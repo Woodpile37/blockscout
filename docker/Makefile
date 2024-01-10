@@ -1,267 +1,150 @@
-SYSTEM = $(shell uname -s)
-HOST = host.docker.internal
-DOCKER_IMAGE = blockscout_prod_matic
-BS_CONTAINER_NAME = blockscout_matic
-THIS_FILE = $(lastword $(MAKEFILE_LIST))
-
-ifeq ($(SYSTEM), Linux)
-	HOST=localhost
-endif
-
-BLOCKSCOUT_CONTAINER_PARAMS = -e 'MIX_ENV=prod' \
-
-ifeq ($(SYSTEM), Linux)
-	BLOCKSCOUT_CONTAINER_PARAMS += --network=host
-endif
-ifdef NETWORK
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'NETWORK=$(NETWORK)'
-endif
-ifdef SUBNETWORK
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'SUBNETWORK=$(SUBNETWORK)'
-endif
-ifdef LOGO
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'LOGO=$(LOGO)'
-endif
-ifdef LOGO_FOOTER
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'LOGO_FOOTER=$(LOGO_FOOTER)'
-endif
-ifdef ETHEREUM_JSONRPC_VARIANT
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'ETHEREUM_JSONRPC_VARIANT=$(ETHEREUM_JSONRPC_VARIANT)'
-endif
-ifdef ETHEREUM_JSONRPC_HTTP_URL
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'ETHEREUM_JSONRPC_HTTP_URL=$(ETHEREUM_JSONRPC_HTTP_URL)'
-endif
-ifdef ETHEREUM_JSONRPC_TRACE_URL
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'ETHEREUM_JSONRPC_TRACE_URL=$(ETHEREUM_JSONRPC_TRACE_URL)'
-endif
-ifdef ETHEREUM_JSONRPC_WS_URL
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'ETHEREUM_JSONRPC_WS_URL=$(ETHEREUM_JSONRPC_WS_URL)'
-endif
-ifdef ETHEREUM_JSONRPC_TRANSPORT
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'ETHEREUM_JSONRPC_TRANSPORT=$(ETHEREUM_JSONRPC_TRANSPORT)'
-endif
-ifdef IPC_PATH
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'IPC_PATH=$(IPC_PATH)'
-endif
-ifdef NETWORK_PATH
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'NETWORK_PATH=$(NETWORK_PATH)'
-endif
-ifdef SECRET_KEY_BASE
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'SECRET_KEY_BASE=$(SECRET_KEY_BASE)'
-endif
-ifdef CHECK_ORIGIN
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'CHECK_ORIGIN=$(CHECK_ORIGIN)'
-endif
-ifdef PORT
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'PORT=$(PORT)'
-endif
-ifdef COIN
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'COIN=$(COIN)'
-endif
-ifdef METADATA_CONTRACT
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'METADATA_CONTRACT=$(METADATA_CONTRACT)'
-endif
-ifdef VALIDATORS_CONTRACT
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'VALIDATORS_CONTRACT=$(VALIDATORS_CONTRACT)'
-endif
-ifdef KEYS_MANAGER_CONTRACT
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'KEYS_MANAGER_CONTRACT=$(KEYS_MANAGER_CONTRACT)'
-endif
-ifdef SUPPLY_MODULE
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'SUPPLY_MODULE=$(SUPPLY_MODULE)'
-endif
-ifdef SOURCE_MODULE
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'SOURCE_MODULE=$(SOURCE_MODULE)'
-endif
-ifdef DATABASE_URL
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'DATABASE_URL=$(DATABASE_URL)'
-endif
-ifdef POOL_SIZE
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'POOL_SIZE=$(POOL_SIZE)'
-endif
-ifdef ECTO_USE_SSL
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'ECTO_USE_SSL=$(ECTO_USE_SSL)'
-endif
-ifdef DATADOG_HOST
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'DATADOG_HOST=$(DATADOG_HOST)'
-endif
-ifdef DATADOG_PORT
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'DATADOG_PORT=$(DATADOG_PORT)'
-endif
-ifdef SPANDEX_BATCH_SIZE
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'SPANDEX_BATCH_SIZE=$(SPANDEX_BATCH_SIZE)'
-endif
-ifdef SPANDEX_SYNC_THRESHOLD
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'SPANDEX_SYNC_THRESHOLD=$(SPANDEX_SYNC_THRESHOLD)'
-endif
-ifdef HEART_BEAT_TIMEOUT
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'HEART_BEAT_TIMEOUT=$(HEART_BEAT_TIMEOUT)'
-endif
-ifdef HEART_COMMAND
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'HEART_COMMAND=$(HEART_COMMAND)'
-endif
-ifdef BLOCKSCOUT_VERSION
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'BLOCKSCOUT_VERSION=$(BLOCKSCOUT_VERSION)'
-endif
-ifdef RELEASE_LINK
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'RELEASE_LINK=$(RELEASE_LINK)'
-endif
-ifdef ELIXIR_VERSION
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'ELIXIR_VERSION=$(ELIXIR_VERSION)'
-endif
-ifdef BLOCK_TRANSFORMER
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'BLOCK_TRANSFORMER=$(BLOCK_TRANSFORMER)'
-endif
-ifdef GRAPHIQL_TRANSACTION
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'GRAPHIQL_TRANSACTION=$(GRAPHIQL_TRANSACTION)'
-endif
-ifdef FIRST_BLOCK
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'FIRST_BLOCK=$(FIRST_BLOCK)'
-endif
-ifdef LAST_BLOCK
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'LAST_BLOCK=$(LAST_BLOCK)'
-endif
-ifdef TXS_COUNT_CACHE_PERIOD
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'TXS_COUNT_CACHE_PERIOD=$(TXS_COUNT_CACHE_PERIOD)'
-endif
-ifdef ADDRESS_WITH_BALANCES_UPDATE_INTERVAL
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'ADDRESS_WITH_BALANCES_UPDATE_INTERVAL=$(ADDRESS_WITH_BALANCES_UPDATE_INTERVAL)'
-endif
-ifdef LINK_TO_OTHER_EXPLORERS
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'LINK_TO_OTHER_EXPLORERS=$(LINK_TO_OTHER_EXPLORERS)'
-endif
-ifdef SUPPORTED_CHAINS
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'SUPPORTED_CHAINS=$(SUPPORTED_CHAINS)'
-endif
-ifdef BLOCK_COUNT_CACHE_PERIOD
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'BLOCK_COUNT_CACHE_PERIOD=$(BLOCK_COUNT_CACHE_PERIOD)'
-endif
-ifdef ADDRESS_SUM_CACHE_PERIOD
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'ADDRESS_SUM_CACHE_PERIOD=$(ADDRESS_SUM_CACHE_PERIOD)'
-endif
-ifdef ADDRESS_COUNT_CACHE_PERIOD
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'ADDRESS_COUNT_CACHE_PERIOD=$(ADDRESS_COUNT_CACHE_PERIOD)'
-endif
-ifdef ALLOWED_EVM_VERSIONS
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'ALLOWED_EVM_VERSIONS=$(ALLOWED_EVM_VERSIONS)'
-endif
-ifdef UNCLES_IN_AVERAGE_BLOCK_TIME
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'UNCLES_IN_AVERAGE_BLOCK_TIME=$(UNCLES_IN_AVERAGE_BLOCK_TIME)'
-endif
-ifdef AVERAGE_BLOCK_CACHE_PERIOD
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'AVERAGE_BLOCK_CACHE_PERIOD=$(AVERAGE_BLOCK_CACHE_PERIOD)'
-endif
-ifdef MARKET_HISTORY_CACHE_PERIOD
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'MARKET_HISTORY_CACHE_PERIOD=$(MARKET_HISTORY_CACHE_PERIOD)'
-endif
-ifdef DISABLE_WEBAPP
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'DISABLE_WEBAPP=$(DISABLE_WEBAPP)'
-endif
-ifdef DISABLE_READ_API
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'DISABLE_READ_API=$(DISABLE_READ_API)'
-endif
-ifdef DISABLE_WRITE_API
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'DISABLE_WRITE_API=$(DISABLE_WRITE_API)'
-endif
-ifdef DISABLE_INDEXER
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'DISABLE_INDEXER=$(DISABLE_INDEXER)'
-endif
-ifdef WEBAPP_URL
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'WEBAPP_URL=$(WEBAPP_URL)'
-endif
-ifdef API_URL
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'API_URL=$(API_URL)'
-endif
-ifdef CHAIN_SPEC_PATH
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'CHAIN_SPEC_PATH=$(CHAIN_SPEC_PATH)'
-endif
-ifdef EMISSION_FORMAT
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'EMISSION_FORMAT=$(EMISSION_FORMAT)'
-endif
-ifdef REWARDS_CONTRACT
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'REWARDS_CONTRACT=$(REWARDS_CONTRACT)'
-endif
-ifdef SHOW_ADDRESS_MARKETCAP_PERCENTAGE
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'SHOW_ADDRESS_MARKETCAP_PERCENTAGE=$(SHOW_ADDRESS_MARKETCAP_PERCENTAGE)'
-endif
-ifdef BLOCKSCOUT_HOST
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'BLOCKSCOUT_HOST=$(BLOCKSCOUT_HOST)'
-endif
-ifdef BLOCKSCOUT_PROTOCOL
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'BLOCKSCOUT_PROTOCOL=$(BLOCKSCOUT_PROTOCOL)'
-endif
-ifdef DECOMPILED_SMART_CONTRACT_TOKEN
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'DECOMPILED_SMART_CONTRACT_TOKEN=$(DECOMPILED_SMART_CONTRACT_TOKEN)'
-endif
-ifdef SOCKET_ROOT
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'SOCKET_ROOT=$(SOCKET_ROOT)'
-endif
-ifdef API_PATH
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'API_PATH=$(API_PATH)'
-endif
-ifdef CHECKSUM_ADDRESS_HASHES
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'CHECKSUM_ADDRESS_HASHES=$(CHECKSUM_ADDRESS_HASHES)'
-endif
-ifdef CHECKSUM_FUNCTION
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'CHECKSUM_FUNCTION=$(CHECKSUM_FUNCTION)'
-endif
-ifdef COINGECKO_COIN_ID
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'COINGECKO_COIN_ID=$(COINGECKO_COIN_ID)'
-endif
-ifdef DISABLE_EXCHANGE_RATES
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'DISABLE_EXCHANGE_RATES=$(DISABLE_EXCHANGE_RATES)'
-endif
-ifdef SHOW_PRICE_CHART
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'SHOW_PRICE_CHART=$(SHOW_PRICE_CHART)'
-endif
-ifdef SHOW_TXS_CHART
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'SHOW_TXS_CHART=$(SHOW_TXS_CHART)'
-endif
-ifdef HISTORY_FETCH_INTERVAL
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'HISTORY_FETCH_INTERVAL=$(HISTORY_FETCH_INTERVAL)'
-endif
-ifdef TXS_HISTORIAN_INIT_LAG
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'TXS_HISTORIAN_INIT_LAG=$(TXS_HISTORIAN_INIT_LAG)'
-endif
-ifdef TXS_STATS_DAYS_TO_COMPILE_AT_INIT
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'TXS_STATS_DAYS_TO_COMPILE_AT_INIT=$(TXS_STATS_DAYS_TO_COMPILE_AT_INIT)'
-endif
-ifdef APPS_MENU
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'APPS_MENU=$(APPS_MENU)'
-endif
-ifdef EXTERNAL_APPS
-	BLOCKSCOUT_CONTAINER_PARAMS += -e 'EXTERNAL_APPS=$(EXTERNAL_APPS)'
-endif
-
-HAS_BLOCKSCOUT_IMAGE := $(shell docker images | grep ${DOCKER_IMAGE})
-build: 
-	@echo "==> Checking for blockscout image $(DOCKER_IMAGE)"
-ifdef HAS_BLOCKSCOUT_IMAGE
-	@echo "==> Image exist. Using $(DOCKER_IMAGE)"
-else
-	@echo "==> No image found trying to build one..."
-	@docker build --build-arg COIN="$(COIN)" -f ./Dockerfile -t $(DOCKER_IMAGE) ../
-endif
-
-migrate:
-	@echo "==> Running migrations"
-	@docker run --rm \
-					$(BLOCKSCOUT_CONTAINER_PARAMS) \
-					$(DOCKER_IMAGE) /bin/sh -c "echo $$MIX_ENV && mix do ecto.create, ecto.migrate"
-
+DOCKER_REPO := blockscout
+BACKEND_APP_NAME := blockscout
+FRONTEND_APP_NAME := frontend
+BACKEND_CONTAINER_IMAGE := $(DOCKER_REPO)/$(BACKEND_APP_NAME)
+BACKEND_CONTAINER_NAME := backend
+FRONTEND_CONTAINER_NAME := frontend
+VISUALIZER_CONTAINER_NAME := visualizer
+SIG_PROVIDER_CONTAINER_NAME := sig-provider
+STATS_CONTAINER_NAME := stats
+STATS_DB_CONTAINER_NAME := stats-postgres
+PROXY_CONTAINER_NAME := proxy
+PG_CONTAINER_NAME := postgres
+RELEASE_VERSION ?= '6.0.0'
+TAG := $(RELEASE_VERSION)-commit-$(shell git log -1 --pretty=format:"%h")
+STABLE_TAG := $(RELEASE_VERSION)
 
 start:
-	@$(MAKE) -f $(THIS_FILE) build
-	@$(MAKE) -f $(THIS_FILE) migrate
-	@echo "==> Starting blockscout"
-	@docker run --rm --name $(BS_CONTAINER_NAME) \
-					$(BLOCKSCOUT_CONTAINER_PARAMS) \
-					-p 4000:4000 \
-					$(DOCKER_IMAGE) /bin/sh -c "mix phx.server"
+	@echo "==> Starting blockscout db"
+	@docker-compose -f ../docker-compose/services/db.yml up -d
+	@echo "==> Starting blockscout backend"
+	@docker-compose -f ../docker-compose/services/backend.yml up -d
+	@echo "==> Starting stats microservice"
+	@docker-compose -f ../docker-compose/services/stats.yml up -d
+	@echo "==> Starting visualizer microservice"
+	@docker-compose -f ../docker-compose/services/visualizer.yml up -d
+	@echo "==> Starting sig-provider microservice"
+	@docker-compose -f ../docker-compose/services/sig-provider.yml up -d
+	@echo "==> Starting blockscout frontend"
+	@docker-compose -f ../docker-compose/services/frontend.yml up -d
+	@echo "==> Starting Nginx proxy"
+	@docker-compose -f ../docker-compose/services/nginx.yml up -d
+
+BS_BACKEND_STARTED := $(shell docker ps --no-trunc --filter name=^/${BACKEND_CONTAINER_NAME}$  | grep ${BACKEND_CONTAINER_NAME})
+BS_FRONTEND_STARTED := $(shell docker ps --no-trunc --filter name=^/${FRONTEND_CONTAINER_NAME}$  | grep ${FRONTEND_CONTAINER_NAME})
+BS_STATS_STARTED := $(shell docker ps --no-trunc --filter name=^/${STATS_CONTAINER_NAME}$  | grep ${STATS_CONTAINER_NAME})
+BS_STATS_DB_STARTED := $(shell docker ps --no-trunc --filter name=^/${STATS_DB_CONTAINER_NAME}$  | grep ${STATS_DB_CONTAINER_NAME})
+BS_VISUALIZER_STARTED := $(shell docker ps --no-trunc --filter name=^/${VISUALIZER_CONTAINER_NAME}$  | grep ${VISUALIZER_CONTAINER_NAME})
+BS_SIG_PROVIDER_STARTED := $(shell docker ps --no-trunc --filter name=^/${SIG_PROVIDER_CONTAINER_NAME}$  | grep ${SIG_PROVIDER_CONTAINER_NAME})
+BS_PROXY_STARTED := $(shell docker ps --no-trunc --filter name=^/${PROXY_CONTAINER_NAME}$  | grep ${PROXY_CONTAINER_NAME})
+stop:
+ifdef BS_FRONTEND_STARTED
+	@echo "==> Stopping Blockscout frontend container."
+	@docker stop $(FRONTEND_CONTAINER_NAME) && docker rm -f $(FRONTEND_CONTAINER_NAME)
+	@echo "==> Blockscout frontend container stopped."
+else
+	@echo "==> Blockscout frontend container already stopped before."
+endif
+ifdef BS_BACKEND_STARTED
+	@echo "==> Stopping Blockscout backend container."
+	@docker stop $(BACKEND_CONTAINER_NAME)  && docker rm -f $(BACKEND_CONTAINER_NAME)
+	@echo "==> Blockscout backend container stopped."
+else
+	@echo "==> Blockscout backend container already stopped before."
+endif
+ifdef BS_STATS_DB_STARTED
+	@echo "==> Stopping Blockscout stats db container."
+	@docker stop $(STATS_DB_CONTAINER_NAME) && docker rm -f $(STATS_DB_CONTAINER_NAME)
+	@echo "==> Blockscout stats db container stopped."
+else
+	@echo "==> Blockscout stats db container already stopped before."
+endif
+ifdef BS_STATS_STARTED
+	@echo "==> Stopping Blockscout stats container."
+	@docker stop $(STATS_CONTAINER_NAME) && docker rm -f $(STATS_CONTAINER_NAME)
+	@echo "==> Blockscout stats container stopped."
+else
+	@echo "==> Blockscout stats container already stopped before."
+endif
+ifdef BS_VISUALIZER_STARTED
+	@echo "==> Stopping Blockscout visualizer container."
+	@docker stop $(VISUALIZER_CONTAINER_NAME) && docker rm -f $(VISUALIZER_CONTAINER_NAME)
+	@echo "==> Blockscout visualizer container stopped."
+else
+	@echo "==> Blockscout visualizer container already stopped before."
+endif
+ifdef BS_SIG_PROVIDER_STARTED
+	@echo "==> Stopping Blockscout sig-provider container."
+	@docker stop $(SIG_PROVIDER_CONTAINER_NAME) && docker rm -f $(SIG_PROVIDER_CONTAINER_NAME)
+	@echo "==> Blockscout sig-provider container stopped."
+else
+	@echo "==> Blockscout sig-provider container already stopped before."
+endif
+ifdef BS_PROXY_STARTED
+	@echo "==> Stopping Nginx proxy container."
+	@docker stop $(PROXY_CONTAINER_NAME) && docker rm -f $(PROXY_CONTAINER_NAME)
+	@echo "==> Nginx proxy container stopped."
+else
+	@echo "==> Nginx proxy container already stopped before."
+endif
+ifdef PG_STARTED
+	@echo "==> Stopping Postgres container."
+	@docker stop $(PG_CONTAINER_NAME)
+	@echo "==> Postgres container stopped."
+else
+	@echo "==> Postgres container already stopped before."
+endif
 
 run: start
 
+docker-login: ## login to DockerHub with credentials found in env
+	docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}
+
+# Docker release - build, tag and push the container
+pre-release: build publish ## Make a release by building and publishing the `{version}` ans `latest` tagged containers to hub
+release: build publish-stable ## Make a release by building and publishing the `{version}` ans `latest` tagged containers to hub
+
+# Docker publish
+publish: docker-login publish-latest publish-version ## publish the `{version}` ans `latest` tagged containers to hub
+publish-stable: docker-login publish-latest publish-stable-version ## publish the `{version}` ans `latest` tagged containers to hub
+
+publish-latest: tag-latest ## publish the `latest` tagged container to hub
+	@echo 'publish latest to $(DOCKER_REPO)'
+	docker push $(BACKEND_CONTAINER_IMAGE):latest
+
+publish-version: tag-version ## publish the `{version}` tagged container to hub
+	@echo 'publish $(TAG) to $(DOCKER_REPO)'
+	docker push $(BACKEND_CONTAINER_IMAGE):$(TAG)
+
+publish-stable-version: tag-stable-version ## publish the `{version}` tagged container to hub
+	@echo 'publish $(STABLE_TAG) to $(DOCKER_REPO)'
+	docker push $(BACKEND_CONTAINER_IMAGE):$(STABLE_TAG)
+
+# Docker tagging
+tag: tag-latest tag-version ## Generate container tags for the `{version}` ans `latest` tags
+tag-stable: tag-latest tag-stable-version ## Generate container tags for the `{version}` ans `latest` tags
+
+tag-latest: ## Generate container `latest` tag
+	@echo 'create latest tag'
+	docker tag $(BACKEND_CONTAINER_IMAGE) $(BACKEND_CONTAINER_IMAGE):latest
+
+tag-version: ## Generate container `{version}` tag
+	@echo 'create tag $(TAG)'
+	docker tag $(BACKEND_CONTAINER_IMAGE) $(BACKEND_CONTAINER_IMAGE):$(TAG)
+
+tag-stable-version: ## Generate container `{version}` tag
+	@echo 'create tag $(STABLE_TAG)'
+	docker tag $(BACKEND_CONTAINER_IMAGE) $(BACKEND_CONTAINER_IMAGE):$(STABLE_TAG)
+
 .PHONY: build \
-				migrate \
 				start \
-				run 
+				stop \
+				run \
+				docker-login \
+				release \
+				publish \
+				publish-latest \
+				publish-version \
+				tag \
+				tag-latest \
+				tag-version

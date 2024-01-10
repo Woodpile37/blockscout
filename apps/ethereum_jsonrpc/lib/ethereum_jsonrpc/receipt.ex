@@ -125,41 +125,6 @@ defmodule EthereumJSONRPC.Receipt do
           "gasUsed" => gas_used,
           "contractAddress" => created_contract_address_hash,
           "transactionHash" => transaction_hash,
-          "transactionIndex" => transaction_index,
-          "l1Fee" => l1_fee,
-          "l1FeeScalar" => l1_fee_scalar_string,
-          "l1GasPrice" => l1_gas_price,
-          "l1GasUsed" => l1_gas_used
-        } = elixir
-      ) do
-    status = elixir_to_status(elixir)
-
-    {l1_fee_scalar, _} =
-      l1_fee_scalar_string
-      |> Float.parse()
-
-    %{
-      cumulative_gas_used: cumulative_gas_used,
-      gas_used: gas_used,
-      created_contract_address_hash: created_contract_address_hash,
-      status: status,
-      transaction_hash: transaction_hash,
-      transaction_index: transaction_index,
-      l1_fee: l1_fee,
-      l1_fee_scalar: l1_fee_scalar,
-      l1_gas_price: l1_gas_price,
-      l1_gas_used: l1_gas_used
-    }
-  end
-
-  # eth_getTransactionReceipt on Optimism BedRock Geth node
-  # doesn't return L1 fields for system transactions
-  def elixir_to_params(
-        %{
-          "cumulativeGasUsed" => cumulative_gas_used,
-          "gasUsed" => gas_used,
-          "contractAddress" => created_contract_address_hash,
-          "transactionHash" => transaction_hash,
           "transactionIndex" => transaction_index
         } = elixir
       ) do
@@ -288,11 +253,11 @@ defmodule EthereumJSONRPC.Receipt do
   # hash format
   # gas is passed in from the `t:EthereumJSONRPC.Transaction.params/0` to allow pre-Byzantium status to be derived
   defp entry_to_elixir({key, _} = entry)
-       when key in ~w(blockHash contractAddress from gas logsBloom root to transactionHash revertReason type effectiveGasPrice l1FeeScalar),
+       when key in ~w(blockHash contractAddress from gas logsBloom root to transactionHash revertReason type effectiveGasPrice),
        do: {:ok, entry}
 
   defp entry_to_elixir({key, quantity})
-       when key in ~w(blockNumber cumulativeGasUsed gasUsed transactionIndex l1Fee l1GasPrice l1GasUsed) do
+       when key in ~w(blockNumber cumulativeGasUsed gasUsed transactionIndex) do
     result =
       if is_nil(quantity) do
         nil
@@ -335,7 +300,7 @@ defmodule EthereumJSONRPC.Receipt do
   end
 
   # Arbitrum fields
-  defp entry_to_elixir({key, _}) when key in ~w(returnData returnCode feeStats) do
+  defp entry_to_elixir({key, _}) when key in ~w(returnData returnCode feeStats l1BlockNumber gasUsedForL1) do
     :ignore
   end
 
@@ -351,6 +316,11 @@ defmodule EthereumJSONRPC.Receipt do
 
   # Optimism specific transaction receipt fields
   defp entry_to_elixir({key, _}) when key in ~w(depositNonce depositReceiptVersion) do
+    :ignore
+  end
+
+  # EIP-4844 transaction receipt fields
+  defp entry_to_elixir({key, _}) when key in ~w(blobGasUsed blobGasPrice) do
     :ignore
   end
 

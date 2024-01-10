@@ -69,8 +69,6 @@ defmodule EthereumJSONRPC.Transaction do
           max_priority_fee_per_gas: non_neg_integer(),
           max_fee_per_gas: non_neg_integer(),
           type: non_neg_integer(),
-          l1_tx_origin: EthereumJSONRPC.hash(),
-          l1_block_number: non_neg_integer(),
           execution_node_hash: EthereumJSONRPC.address(),
           wrapped_type: non_neg_integer(),
           wrapped_nonce: non_neg_integer(),
@@ -96,6 +94,7 @@ defmodule EthereumJSONRPC.Transaction do
       ...>     "blockNumber" => 46147,
       ...>     "from" => "0xa1e4380a3b1f749673e270229993ee55f35663b4",
       ...>     "gas" => 21000,
+      ...>     "gasPrice" => 50000000000000,
       ...>     "hash" => "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060",
       ...>     "input" => "0x",
       ...>     "nonce" => 0,
@@ -103,7 +102,6 @@ defmodule EthereumJSONRPC.Transaction do
       ...>     "s" => 31606574786494953692291101914709926755545765281581808821704454381804773090106,
       ...>     "to" => "0x5df9b87991262f6ba471f09758cde1c0fc1de734",
       ...>     "transactionIndex" => 0,
-      ...>     "type" => 2,
       ...>     "v" => 28,
       ...>     "value" => 31337
       ...>   }
@@ -113,6 +111,7 @@ defmodule EthereumJSONRPC.Transaction do
         block_number: 46147,
         from_address_hash: "0xa1e4380a3b1f749673e270229993ee55f35663b4",
         gas: 21000,
+        gas_price: 50000000000000,
         hash: "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060",
         index: 0,
         input: "0x",
@@ -120,11 +119,9 @@ defmodule EthereumJSONRPC.Transaction do
         r: 61965845294689009770156372156374760022787886965323743865986648153755601564112,
         s: 31606574786494953692291101914709926755545765281581808821704454381804773090106,
         to_address_hash: "0x5df9b87991262f6ba471f09758cde1c0fc1de734",
-        type: 2,
         v: 28,
         value: 31337,
-        transaction_index: 0,
-        gas_price: 0
+        transaction_index: 0
       }
 
   Erigon `elixir` from txpool_content method can be converted to `params`.
@@ -246,202 +243,6 @@ defmodule EthereumJSONRPC.Transaction do
     ])
   end
 
-  def elixir_to_params(
-        %{
-          "blockHash" => block_hash,
-          "blockNumber" => block_number,
-          "from" => from_address_hash,
-          "gas" => gas,
-          "gasPrice" => gas_price,
-          "hash" => hash,
-          "input" => input,
-          "nonce" => nonce,
-          "r" => r,
-          "s" => s,
-          "to" => to_address_hash,
-          "transactionIndex" => index,
-          "v" => v,
-          "value" => value,
-          "type" => type,
-          "maxPriorityFeePerGas" => max_priority_fee_per_gas,
-          "maxFeePerGas" => max_fee_per_gas,
-          "l1TxOrigin" => l1_tx_origin,
-          "l1BlockNumber" => l1_block_number
-        } = transaction
-      ) do
-    result = %{
-      block_hash: block_hash,
-      block_number: block_number,
-      from_address_hash: from_address_hash,
-      gas: gas,
-      gas_price: gas_price,
-      hash: hash,
-      index: index,
-      input: input,
-      nonce: nonce,
-      r: r,
-      s: s,
-      to_address_hash: to_address_hash,
-      v: v,
-      value: value,
-      transaction_index: index,
-      type: type,
-      max_priority_fee_per_gas: max_priority_fee_per_gas,
-      max_fee_per_gas: max_fee_per_gas,
-      l1_tx_origin: l1_tx_origin,
-      l1_block_number: l1_block_number
-    }
-
-    if transaction["creates"] do
-      Map.put(result, :created_contract_address_hash, transaction["creates"])
-    else
-      result
-    end
-  end
-
-  def elixir_to_params(
-        %{
-          "blockHash" => block_hash,
-          "blockNumber" => block_number,
-          "from" => from_address_hash,
-          "gas" => gas,
-          "gasPrice" => gas_price,
-          "hash" => hash,
-          "input" => input,
-          "nonce" => nonce,
-          "r" => r,
-          "s" => s,
-          "to" => to_address_hash,
-          "transactionIndex" => index,
-          "v" => v,
-          "value" => value,
-          "type" => type,
-          "l1TxOrigin" => l1_tx_origin,
-          "l1BlockNumber" => l1_block_number
-        } = transaction
-      ) do
-    result = %{
-      block_hash: block_hash,
-      block_number: block_number,
-      from_address_hash: from_address_hash,
-      gas: gas,
-      gas_price: gas_price,
-      hash: hash,
-      index: index,
-      input: input,
-      nonce: nonce,
-      r: r,
-      s: s,
-      to_address_hash: to_address_hash,
-      v: v,
-      value: value,
-      transaction_index: index,
-      type: type,
-      l1_tx_origin: l1_tx_origin,
-      l1_block_number: l1_block_number
-    }
-
-    if transaction["creates"] do
-      Map.put(result, :created_contract_address_hash, transaction["creates"])
-    else
-      result
-    end
-  end
-
-  def elixir_to_params(
-        %{
-          "blockHash" => block_hash,
-          "blockNumber" => block_number,
-          "from" => from_address_hash,
-          "gas" => gas,
-          "gasPrice" => gas_price,
-          "hash" => hash,
-          "input" => input,
-          "nonce" => nonce,
-          "r" => r,
-          "s" => s,
-          "to" => to_address_hash,
-          "transactionIndex" => index,
-          "v" => v,
-          "value" => value,
-          "l1TxOrigin" => l1_tx_origin,
-          "l1BlockNumber" => l1_block_number
-        } = transaction
-      ) do
-    result = %{
-      block_hash: block_hash,
-      block_number: block_number,
-      from_address_hash: from_address_hash,
-      gas: gas,
-      gas_price: gas_price,
-      hash: hash,
-      index: index,
-      input: input,
-      nonce: nonce,
-      r: r,
-      s: s,
-      to_address_hash: to_address_hash,
-      v: v,
-      value: value,
-      transaction_index: index,
-      l1_tx_origin: l1_tx_origin,
-      l1_block_number: l1_block_number
-    }
-
-    if transaction["creates"] do
-      Map.put(result, :created_contract_address_hash, transaction["creates"])
-    else
-      result
-    end
-  end
-
-  def elixir_to_params(
-        %{
-          "blockHash" => block_hash,
-          "blockNumber" => block_number,
-          "from" => from_address_hash,
-          "gas" => gas,
-          "gasPrice" => gas_price,
-          "hash" => hash,
-          "input" => input,
-          "nonce" => nonce,
-          "r" => r,
-          "s" => s,
-          "to" => to_address_hash,
-          "transactionIndex" => index,
-          "v" => v,
-          "value" => value,
-          "l1BlockNumber" => l1_block_number
-        } = transaction
-      ) do
-    result = %{
-      block_hash: block_hash,
-      block_number: block_number,
-      from_address_hash: from_address_hash,
-      gas: gas,
-      gas_price: gas_price,
-      hash: hash,
-      index: index,
-      input: input,
-      nonce: nonce,
-      r: r,
-      s: s,
-      to_address_hash: to_address_hash,
-      v: v,
-      value: value,
-      transaction_index: index,
-      l1_block_number: l1_block_number
-    }
-
-    if transaction["creates"] do
-      Map.put(result, :created_contract_address_hash, transaction["creates"])
-    else
-      result
-    end
-  end
-
-  # eth_getTransactionReceipt and eth_getTransactionByHash don't return
-  # L1 fields by Optimism BedRock node
   def elixir_to_params(
         %{
           "blockHash" => block_hash,
@@ -609,14 +410,13 @@ defmodule EthereumJSONRPC.Transaction do
     ])
   end
 
-  # eth_getTransactionReceipt on Optimism BedRock Geth node
-  # doesn't return gas price and L1 fields for system transactions
   def elixir_to_params(
         %{
           "blockHash" => block_hash,
           "blockNumber" => block_number,
           "from" => from_address_hash,
           "gas" => gas,
+          "gasPrice" => gas_price,
           "hash" => hash,
           "input" => input,
           "nonce" => nonce,
@@ -624,9 +424,9 @@ defmodule EthereumJSONRPC.Transaction do
           "s" => s,
           "to" => to_address_hash,
           "transactionIndex" => index,
-          "type" => type,
           "v" => v,
-          "value" => value
+          "value" => value,
+          "type" => type
         } = transaction
       ) do
     result = %{
@@ -634,7 +434,7 @@ defmodule EthereumJSONRPC.Transaction do
       block_number: block_number,
       from_address_hash: from_address_hash,
       gas: gas,
-      gas_price: 0,
+      gas_price: gas_price,
       hash: hash,
       index: index,
       input: input,
@@ -654,7 +454,6 @@ defmodule EthereumJSONRPC.Transaction do
     ])
   end
 
-  # without `to` field (observed on Sepolia RPC)
   def elixir_to_params(
         %{
           "blockHash" => block_hash,
@@ -667,100 +466,7 @@ defmodule EthereumJSONRPC.Transaction do
           "nonce" => nonce,
           "r" => r,
           "s" => s,
-          "transactionIndex" => index,
-          "v" => v,
-          "value" => value,
-          "type" => type,
-          "maxPriorityFeePerGas" => max_priority_fee_per_gas,
-          "maxFeePerGas" => max_fee_per_gas
-        } = transaction
-      ) do
-    result = %{
-      block_hash: block_hash,
-      block_number: block_number,
-      from_address_hash: from_address_hash,
-      gas: gas,
-      gas_price: gas_price,
-      hash: hash,
-      index: index,
-      input: input,
-      nonce: nonce,
-      r: r,
-      s: s,
-      to_address_hash: nil,
-      v: v,
-      value: value,
-      transaction_index: index,
-      type: type,
-      max_priority_fee_per_gas: max_priority_fee_per_gas,
-      max_fee_per_gas: max_fee_per_gas
-    }
-
-    if transaction["creates"] do
-      Map.put(result, :created_contract_address_hash, transaction["creates"])
-    else
-      result
-    end
-  end
-
-  # without `to`, `maxPriorityFeePerGas`, `maxFeePerGas` fields (observed on Sepolia RPC)
-  def elixir_to_params(
-        %{
-          "blockHash" => block_hash,
-          "blockNumber" => block_number,
-          "from" => from_address_hash,
-          "gas" => gas,
-          "gasPrice" => gas_price,
-          "hash" => hash,
-          "input" => input,
-          "nonce" => nonce,
-          "r" => r,
-          "s" => s,
-          "transactionIndex" => index,
-          "v" => v,
-          "value" => value,
-          "type" => type
-        } = transaction
-      ) do
-    result = %{
-      block_hash: block_hash,
-      block_number: block_number,
-      from_address_hash: from_address_hash,
-      gas: gas,
-      gas_price: gas_price,
-      hash: hash,
-      index: index,
-      input: input,
-      nonce: nonce,
-      r: r,
-      s: s,
-      to_address_hash: nil,
-      v: v,
-      value: value,
-      transaction_index: index,
-      type: type
-    }
-
-    if transaction["creates"] do
-      Map.put(result, :created_contract_address_hash, transaction["creates"])
-    else
-      result
-    end
-  end
-
-  # without `to`, `maxPriorityFeePerGas`, `maxFeePerGas`, `type` fields (observed on EthereumJSONRPC tests)
-  def elixir_to_params(
-        %{
-          "blockHash" => block_hash,
-          "blockNumber" => block_number,
-          "from" => from_address_hash,
-          "gas" => gas,
-          "gasPrice" => gas_price,
-          "hash" => hash,
-          "input" => input,
-          "nonce" => nonce,
-          "r" => r,
-          "s" => s,
+          "to" => to_address_hash,
           "transactionIndex" => index,
           "v" => v,
           "value" => value
@@ -778,7 +484,7 @@ defmodule EthereumJSONRPC.Transaction do
       nonce: nonce,
       r: r,
       s: s,
-      to_address_hash: nil,
+      to_address_hash: to_address_hash,
       v: v,
       value: value,
       transaction_index: index
@@ -912,14 +618,23 @@ defmodule EthereumJSONRPC.Transaction do
     {key, quantity_to_integer(quantity)}
   end
 
+  # to be merged with the clause above ^
+  defp entry_to_elixir({"maxFeePerBlobGas", _value}) do
+    {nil, nil}
+  end
+
+  # EIP-4844 specific field with value of type of list of hashes
+  defp entry_to_elixir({"blobVersionedHashes", _value}) do
+    {nil, nil}
+  end
+
   # as always ganache has it's own vision on JSON RPC standard
   defp entry_to_elixir({key, nil}) when key in ~w(r s v) do
     {key, 0}
   end
 
   # quantity or nil for pending
-  defp entry_to_elixir({key, quantity_or_nil})
-       when key in ~w(blockNumber transactionIndex l1Fee l1FeeScalar l1GasPrice l1GasUsed l1TxOrigin l1BlockNumber) do
+  defp entry_to_elixir({key, quantity_or_nil}) when key in ~w(blockNumber transactionIndex) do
     elixir =
       case quantity_or_nil do
         nil -> nil
