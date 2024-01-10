@@ -3,6 +3,8 @@ defmodule Indexer.Helper do
   Auxiliary common functions for indexers.
   """
 
+  require Logger
+
   alias Explorer.Chain.Hash
 
   @spec address_hash_to_string(binary(), boolean()) :: binary()
@@ -33,12 +35,41 @@ defmodule Indexer.Helper do
     false
   end
 
-  @spec log_topic_to_string(any()) :: binary() | nil
-  def log_topic_to_string(topic) do
-    if is_binary(topic) or is_nil(topic) do
-      topic
+  def log_blocks_chunk_handling(chunk_start, chunk_end, start_block, end_block, items_count, layer) do
+    is_start = is_nil(items_count)
+
+    {type, found} =
+      if is_start do
+        {"Start", ""}
+      else
+        {"Finish", " Found #{items_count}."}
+      end
+
+    target_range =
+      if chunk_start != start_block or chunk_end != end_block do
+        progress =
+          if is_start do
+            ""
+          else
+            percentage =
+              (chunk_end - start_block + 1)
+              |> Decimal.div(end_block - start_block + 1)
+              |> Decimal.mult(100)
+              |> Decimal.round(2)
+              |> Decimal.to_string()
+
+            " Progress: #{percentage}%"
+          end
+
+        " Target range: #{start_block}..#{end_block}.#{progress}"
+      else
+        ""
+      end
+
+    if chunk_start == chunk_end do
+      Logger.info("#{type} handling #{layer} block ##{chunk_start}.#{found}#{target_range}")
     else
-      Hash.to_string(topic)
+      Logger.info("#{type} handling #{layer} block range #{chunk_start}..#{chunk_end}.#{found}#{target_range}")
     end
   end
 end

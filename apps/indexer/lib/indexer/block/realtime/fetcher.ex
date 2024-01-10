@@ -33,7 +33,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
   alias Explorer.Utility.MissingRangesManipulator
   alias Indexer.{Block, Tracer}
   alias Indexer.Block.Realtime.TaskSupervisor
-  alias Indexer.Fetcher.{CoinBalance, CoinBalanceDailyUpdater}
+  alias Indexer.Fetcher.{CoinBalance, CoinBalanceDailyUpdater, OptimismWithdrawal}
   alias Indexer.Fetcher.PolygonEdge.{DepositExecute, Withdrawal}
   alias Indexer.Prometheus
   alias Indexer.Transform.Addresses
@@ -286,6 +286,9 @@ defmodule Indexer.Block.Realtime.Fetcher do
     Indexer.Logger.metadata(
       fn ->
         if reorg? do
+          # we need to remove all rows from `op_withdrawals` table previously written starting from reorg block number
+          OptimismWithdrawal.remove(block_number_to_fetch)
+
           # we need to remove all rows from `polygon_edge_withdrawals` and `polygon_edge_deposit_executes` tables previously written starting from reorg block number
           remove_polygon_edge_assets_by_number(block_number_to_fetch)
 

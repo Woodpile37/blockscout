@@ -6,9 +6,8 @@ defmodule Indexer.Transform.TokenTransfers do
   require Logger
 
   import Explorer.Chain.SmartContract, only: [burn_address_hash_string: 0]
-  import Explorer.Helper, only: [decode_data: 2]
 
-  alias Explorer.Repo
+  alias Explorer.{Helper, Repo}
   alias Explorer.Chain.{Token, TokenTransfer}
   alias Indexer.Fetcher.TokenTotalSupplyUpdater
 
@@ -154,7 +153,7 @@ defmodule Indexer.Transform.TokenTransfers do
   # ERC-20 token transfer
   defp parse_params(%{second_topic: second_topic, third_topic: third_topic, fourth_topic: nil} = log)
        when not is_nil(second_topic) and not is_nil(third_topic) do
-    [amount] = decode_data(log.data, [{:uint, 256}])
+    [amount] = Helper.decode_data(log.data, [{:uint, 256}])
 
     token_transfer = %{
       amount: Decimal.new(amount || 0),
@@ -180,7 +179,7 @@ defmodule Indexer.Transform.TokenTransfers do
   # ERC-20 token transfer for WETH
   defp parse_params(%{second_topic: second_topic, third_topic: nil, fourth_topic: nil} = log)
        when not is_nil(second_topic) do
-    [amount] = decode_data(log.data, [{:uint, 256}])
+    [amount] = Helper.decode_data(log.data, [{:uint, 256}])
 
     {from_address_hash, to_address_hash} =
       if log.first_topic == TokenTransfer.weth_deposit_signature() do
@@ -213,7 +212,7 @@ defmodule Indexer.Transform.TokenTransfers do
   # ERC-721 token transfer with topics as addresses
   defp parse_params(%{second_topic: second_topic, third_topic: third_topic, fourth_topic: fourth_topic} = log)
        when not is_nil(second_topic) and not is_nil(third_topic) and not is_nil(fourth_topic) do
-    [token_id] = decode_data(fourth_topic, [{:uint, 256}])
+    [token_id] = Helper.decode_data(fourth_topic, [{:uint, 256}])
 
     token_transfer = %{
       block_number: log.block_number,
@@ -245,7 +244,7 @@ defmodule Indexer.Transform.TokenTransfers do
          } = log
        )
        when not is_nil(data) do
-    [from_address_hash, to_address_hash, token_id] = decode_data(data, [:address, :address, {:uint, 256}])
+    [from_address_hash, to_address_hash, token_id] = Helper.decode_data(data, [:address, :address, {:uint, 256}])
 
     token_transfer = %{
       block_number: log.block_number,
@@ -275,7 +274,7 @@ defmodule Indexer.Transform.TokenTransfers do
           data: data
         } = log
       ) do
-    [token_ids, values] = decode_data(data, [{:array, {:uint, 256}}, {:array, {:uint, 256}}])
+    [token_ids, values] = Helper.decode_data(data, [{:array, {:uint, 256}}, {:array, {:uint, 256}}])
 
     if token_ids == [] || values == [] do
       nil
@@ -303,7 +302,7 @@ defmodule Indexer.Transform.TokenTransfers do
   end
 
   def parse_erc1155_params(%{third_topic: third_topic, fourth_topic: fourth_topic, data: data} = log) do
-    [token_id, value] = decode_data(data, [{:uint, 256}, {:uint, 256}])
+    [token_id, value] = Helper.decode_data(data, [{:uint, 256}, {:uint, 256}])
 
     token_transfer = %{
       amount: value,

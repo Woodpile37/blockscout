@@ -426,8 +426,20 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
     }
 
     result
+    |> add_optional_transaction_field(transaction, :l1_fee)
+    |> add_optional_transaction_field(transaction, :l1_fee_scalar)
+    |> add_optional_transaction_field(transaction, :l1_gas_price)
+    |> add_optional_transaction_field(transaction, :l1_gas_used)
+    |> add_optimism_fields(transaction.hash, single_tx?)
     |> chain_type_fields(transaction, single_tx?, conn, watchlist_names)
     |> maybe_put_stability_fee(transaction)
+  end
+
+  defp add_optional_transaction_field(result, transaction, field) do
+    case Map.get(transaction, field) do
+      nil -> result
+      value -> Map.put(result, Atom.to_string(field), value)
+    end
   end
 
   defp chain_type_fields(result, transaction, single_tx?, conn, watchlist_names) do
@@ -559,6 +571,25 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
 
   defp sanitize_log_first_topic(first_topic) do
     if is_nil(first_topic), do: "", else: String.downcase(first_topic)
+  end
+
+  defp add_optimism_fields(result, transaction_hash, single_tx?) do
+    if single_tx? do
+      withdrawals =
+        transaction_hash
+        |> Chain.optimism_withdrawal_transaction_statuses()
+        |> Enum.map(fn {nonce, status, l1_transaction_hash} ->
+          %{
+            "nonce" => nonce,
+            "status" => status,
+            "l1_transaction_hash" => l1_transaction_hash
+          }
+        end)
+
+      Map.put(result, "op_withdrawals", withdrawals)
+    else
+      result
+    end
   end
 
   def token_transfers(_, _conn, false), do: nil
