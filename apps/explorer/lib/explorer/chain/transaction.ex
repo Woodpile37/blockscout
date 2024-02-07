@@ -33,16 +33,17 @@ defmodule Explorer.Chain.Transaction do
   alias Explorer.Chain.Block.Reward
   alias Explorer.Chain.SmartContract.Proxy
   alias Explorer.Chain.Transaction.{Fork, Status}
-  alias Explorer.Chain.Zkevm.BatchTransaction
+  alias Explorer.Chain.Zkevm.BatchTransaction, as: ZkevmBatchTransaction
+  alias Explorer.Chain.ZkSync.BatchTransaction, as: ZkSyncBatchTransaction
   alias Explorer.{PagingOptions, SortingHelper}
   alias Explorer.SmartContract.SigProviderInterface
 
   @optional_attrs ~w(max_priority_fee_per_gas max_fee_per_gas block_hash block_number block_consensus block_timestamp created_contract_address_hash cumulative_gas_used earliest_processing_start
-                     error gas_price gas_used index created_contract_code_indexed_at status to_address_hash revert_reason type has_error_in_internal_txs)a
+                     error gas_price gas_used index created_contract_code_indexed_at status to_address_hash revert_reason type has_error_in_internal_txs r s v)a
 
   @suave_optional_attrs ~w(execution_node_hash wrapped_type wrapped_nonce wrapped_to_address_hash wrapped_gas wrapped_gas_price wrapped_max_priority_fee_per_gas wrapped_max_fee_per_gas wrapped_value wrapped_input wrapped_v wrapped_r wrapped_s wrapped_hash)a
 
-  @required_attrs ~w(from_address_hash gas hash input nonce r s v value)a
+  @required_attrs ~w(from_address_hash gas hash input nonce value)a
 
   @empty_attrs ~w()a
 
@@ -340,10 +341,20 @@ defmodule Explorer.Chain.Transaction do
 
     has_many(:uncles, through: [:forks, :uncle])
 
-    has_one(:zkevm_batch_transaction, BatchTransaction, foreign_key: :hash)
-    has_one(:zkevm_batch, through: [:zkevm_batch_transaction, :batch])
-    has_one(:zkevm_sequence_transaction, through: [:zkevm_batch, :sequence_transaction])
-    has_one(:zkevm_verify_transaction, through: [:zkevm_batch, :verify_transaction])
+    if System.get_env("CHAIN_TYPE") == "polygon_zkevm" do
+      has_one(:zkevm_batch_transaction, ZkevmBatchTransaction, foreign_key: :hash)
+      has_one(:zkevm_batch, through: [:zkevm_batch_transaction, :batch])
+      has_one(:zkevm_sequence_transaction, through: [:zkevm_batch, :sequence_transaction])
+      has_one(:zkevm_verify_transaction, through: [:zkevm_batch, :verify_transaction])
+    end
+
+    if System.get_env("CHAIN_TYPE") == "zksync" do
+      has_one(:zksync_batch_transaction, ZkSyncBatchTransaction, foreign_key: :hash)
+      has_one(:zksync_batch, through: [:zksync_batch_transaction, :batch])
+      has_one(:zksync_commit_transaction, through: [:zksync_batch, :commit_transaction])
+      has_one(:zksync_prove_transaction, through: [:zksync_batch, :prove_transaction])
+      has_one(:zksync_execute_transaction, through: [:zksync_batch, :execute_transaction])
+    end
 
     belongs_to(
       :created_contract_address,

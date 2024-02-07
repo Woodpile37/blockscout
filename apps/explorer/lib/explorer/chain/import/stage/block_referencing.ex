@@ -15,13 +15,7 @@ defmodule Explorer.Chain.Import.Stage.BlockReferencing do
     Runner.TokenTransfers,
     Runner.Address.TokenBalances,
     Runner.TransactionActions,
-    Runner.Withdrawals,
-    Runner.OptimismFrameSequences,
-    Runner.OptimismTxnBatches,
-    Runner.OptimismOutputRoots,
-    Runner.OptimismDeposits,
-    Runner.OptimismWithdrawals,
-    Runner.OptimismWithdrawalEvents
+    Runner.Withdrawals
   ]
 
   @polygon_edge_runners [
@@ -37,12 +31,15 @@ defmodule Explorer.Chain.Import.Stage.BlockReferencing do
     Runner.Zkevm.BatchTransactions
   ]
 
-  @shibarium_runners [
-    Runner.Shibarium.BridgeOperations
+  @zksync_runners [
+    Runner.ZkSync.LifecycleTransactions,
+    Runner.ZkSync.TransactionBatches,
+    Runner.ZkSync.BatchTransactions,
+    Runner.ZkSync.BatchBlocks
   ]
 
-  @artbitrum_runners [
-    Runner.Arbitrum.Messages
+  @shibarium_runners [
+    Runner.Shibarium.BridgeOperations
   ]
 
   @impl Stage
@@ -57,8 +54,8 @@ defmodule Explorer.Chain.Import.Stage.BlockReferencing do
       "shibarium" ->
         @default_runners ++ @shibarium_runners
 
-      "arbitrum" ->
-        @default_runners ++ @artbitrum_runners
+      "zksync" ->
+        @default_runners ++ @zksync_runners
 
       _ ->
         @default_runners
@@ -67,7 +64,7 @@ defmodule Explorer.Chain.Import.Stage.BlockReferencing do
 
   @impl Stage
   def all_runners do
-    @default_runners ++ @polygon_edge_runners ++ @polygon_zkevm_runners ++ @shibarium_runners ++ @artbitrum_runners
+    @default_runners ++ @polygon_edge_runners ++ @polygon_zkevm_runners ++ @shibarium_runners ++ @zksync_runners
   end
 
   @impl Stage
