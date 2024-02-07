@@ -377,15 +377,14 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   def summary(conn, %{"transaction_hash_param" => transaction_hash_string} = params) do
     with {:tx_interpreter_enabled, true} <- {:tx_interpreter_enabled, TransactionInterpretationService.enabled?()},
          {:ok, transaction, _transaction_hash} <- validate_transaction(transaction_hash_string, params) do
-      {response, code} =
+      response =
         case TransactionInterpretationService.interpret(transaction) do
-          {:ok, response} -> {response, 200}
-          {:error, %Jason.DecodeError{}} -> {%{error: "Error while tx interpreter response decoding"}, 500}
-          {{:error, error}, code} -> {%{error: error}, code}
+          {:ok, response} -> response
+          {:error, %Jason.DecodeError{}} -> %{error: "Error while tx interpreter response decoding"}
+          {:error, error} -> %{error: error}
         end
 
       conn
-      |> put_status(code)
       |> json(response)
     end
   end
@@ -393,11 +392,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   @doc """
   Checks if this valid transaction hash string, and this transaction doesn't belong to prohibited address
   """
-  @spec validate_transaction(String.t(), any(), Keyword.t()) ::
-          {:format, :error}
-          | {:not_found, {:error, :not_found}}
-          | {:restricted_access, true}
-          | {:ok, Transaction.t(), Hash.t()}
+  @spec validate_transaction(String.t(), any(), list()) :: {:ok, Transaction.t(), Hash.t()}
   def validate_transaction(transaction_hash_string, params, options \\ @api_true) do
     with {:format, {:ok, transaction_hash}} <- {:format, Chain.string_to_transaction_hash(transaction_hash_string)},
          {:not_found, {:ok, transaction}} <-

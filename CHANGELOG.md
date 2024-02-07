@@ -4,6 +4,8 @@
 
 ### Features
 
+- [#9056](https://github.com/blockscout/blockscout/pull/9056) - Noves.fi API proxy
+
 ### Fixes
 
 ### Chore
@@ -13,11 +15,10 @@
 
 </details>
 
+
 ## 6.0.0-dev
 
 ### Features
-
-- [#9044](https://github.com/blockscout/blockscout/pull/9044) - Expand gas price oracle functionality
 
 ### Fixes
 
@@ -70,7 +71,6 @@
 - [#9094](https://github.com/blockscout/blockscout/pull/9094) - Improve exchange rates logging
 - [#9014](https://github.com/blockscout/blockscout/pull/9014) - Decrease amount of NFT in address collection: 15 -> 9
 - [#8994](https://github.com/blockscout/blockscout/pull/8994) - Refactor transactions event preloads
-- [#8991](https://github.com/blockscout/blockscout/pull/8991) - Manage DB queue target via runtime env var
 
 <details>
   <summary>Dependencies version bumps</summary>
