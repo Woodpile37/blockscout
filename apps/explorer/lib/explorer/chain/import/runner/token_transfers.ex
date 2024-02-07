@@ -4,12 +4,12 @@ defmodule Explorer.Chain.Import.Runner.TokenTransfers do
   """
 
   require Ecto.Query
+  require Logger
 
   import Ecto.Query, only: [from: 2]
 
   alias Ecto.{Changeset, Multi, Repo}
   alias Explorer.Chain.{Import, TokenTransfer}
-  alias Explorer.Prometheus.Instrumenter
 
   @behaviour Import.Runner
 
@@ -42,12 +42,7 @@ defmodule Explorer.Chain.Import.Runner.TokenTransfers do
       |> Map.put(:timestamps, timestamps)
 
     Multi.run(multi, :token_transfers, fn repo, _ ->
-      Instrumenter.block_import_stage_runner(
-        fn -> insert(repo, changes_list, insert_options) end,
-        :block_referencing,
-        :token_transfers,
-        :token_transfers
-      )
+      insert(repo, changes_list, insert_options)
     end)
   end
 
@@ -58,12 +53,13 @@ defmodule Explorer.Chain.Import.Runner.TokenTransfers do
           {:ok, [TokenTransfer.t()]}
           | {:error, [Changeset.t()]}
   def insert(repo, changes_list, %{timeout: timeout, timestamps: timestamps} = options) when is_list(changes_list) do
+    Logger.info(["### Token transfers insert started ###"])
     on_conflict = Map.get_lazy(options, :on_conflict, &default_on_conflict/0)
 
     # Enforce TokenTransfer ShareLocks order (see docs: sharelocks.md)
     ordered_changes_list = Enum.sort_by(changes_list, &{&1.transaction_hash, &1.block_hash, &1.log_index})
 
-    {:ok, inserted} =
+    {:ok, token_transfers} =
       Import.insert_changes_list(
         repo,
         ordered_changes_list,
@@ -75,7 +71,9 @@ defmodule Explorer.Chain.Import.Runner.TokenTransfers do
         timestamps: timestamps
       )
 
-    {:ok, inserted}
+    Logger.info(["### Token transfers insert FINISHED ###"])
+
+    {:ok, token_transfers}
   end
 
   defp default_on_conflict do
@@ -89,19 +87,19 @@ defmodule Explorer.Chain.Import.Runner.TokenTransfers do
           from_address_hash: fragment("EXCLUDED.from_address_hash"),
           to_address_hash: fragment("EXCLUDED.to_address_hash"),
           token_contract_address_hash: fragment("EXCLUDED.token_contract_address_hash"),
-          token_ids: fragment("EXCLUDED.token_ids"),
+          token_id: fragment("EXCLUDED.token_id"),
           inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", token_transfer.inserted_at),
           updated_at: fragment("GREATEST(?, EXCLUDED.updated_at)", token_transfer.updated_at)
         ]
       ],
       where:
         fragment(
-          "(EXCLUDED.amount, EXCLUDED.from_address_hash, EXCLUDED.to_address_hash, EXCLUDED.token_contract_address_hash, EXCLUDED.token_ids) IS DISTINCT FROM (?, ? ,? , ?, ?)",
+          "(EXCLUDED.amount, EXCLUDED.from_address_hash, EXCLUDED.to_address_hash, EXCLUDED.token_contract_address_hash, EXCLUDED.token_id) IS DISTINCT FROM (?, ? ,? , ?, ?)",
           token_transfer.amount,
           token_transfer.from_address_hash,
           token_transfer.to_address_hash,
           token_transfer.token_contract_address_hash,
-          token_transfer.token_ids
+          token_transfer.token_id
         )
     )
   end

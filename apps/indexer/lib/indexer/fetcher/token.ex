@@ -3,7 +3,7 @@ defmodule Indexer.Fetcher.Token do
   Fetches information about a token.
   """
 
-  use Indexer.Fetcher, restart: :permanent
+  use Indexer.Fetcher
   use Spandex.Decorators
 
   alias Explorer.Chain
@@ -14,7 +14,12 @@ defmodule Indexer.Fetcher.Token do
 
   @behaviour BufferedTask
 
-  @default_max_concurrency 10
+  @defaults [
+    flush_interval: 300,
+    max_batch_size: 1,
+    max_concurrency: 4,
+    task_supervisor: Indexer.Fetcher.Token.TaskSupervisor
+  ]
 
   @doc false
   def child_spec([init_options, gen_server_options]) do
@@ -27,7 +32,7 @@ defmodule Indexer.Fetcher.Token do
     end
 
     merged_init_opts =
-      defaults()
+      @defaults
       |> Keyword.merge(mergeable_init_options)
       |> Keyword.put(:state, state)
 
@@ -37,13 +42,9 @@ defmodule Indexer.Fetcher.Token do
   @impl BufferedTask
   def init(initial_acc, reducer, _) do
     {:ok, acc} =
-      Chain.stream_uncataloged_token_contract_address_hashes(
-        initial_acc,
-        fn address, acc ->
-          reducer.(address, acc)
-        end,
-        true
-      )
+      Chain.stream_uncataloged_token_contract_address_hashes(initial_acc, fn address, acc ->
+        reducer.(address, acc)
+      end)
 
     acc
   end
@@ -73,16 +74,7 @@ defmodule Indexer.Fetcher.Token do
       |> MetadataRetriever.get_functions_of()
       |> Map.put(:cataloged, true)
 
-    {:ok, _} = Chain.update_token(token, token_params)
+    {:ok, _} = Chain.update_token(%{token | updated_at: DateTime.utc_now()}, token_params)
     :ok
-  end
-
-  defp defaults do
-    [
-      flush_interval: 300,
-      max_batch_size: 1,
-      max_concurrency: Application.get_env(:indexer, __MODULE__)[:concurrency] || @default_max_concurrency,
-      task_supervisor: Indexer.Fetcher.Token.TaskSupervisor
-    ]
   end
 end

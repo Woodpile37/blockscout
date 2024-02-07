@@ -3,6 +3,8 @@ defmodule Explorer.Chain.Import do
   Bulk importing of data into `Explorer.Repo`
   """
 
+  require Logger
+
   alias Ecto.Changeset
   alias Explorer.Account.Notify
   alias Explorer.Chain.Events.Publisher
@@ -310,6 +312,32 @@ defmodule Explorer.Chain.Import do
     {:ok, inserted}
   end
 
+  def insert_changes_list_in_batches(_module, repo, changes_list, batch_size, options)
+      when is_atom(repo) and is_list(changes_list) do
+    changes_list
+    |> Stream.chunk_every(batch_size)
+    |> Enum.map(fn changes_chunk ->
+      # Logger.info("### #{inspect(module)} changes_chunk size #{Enum.count(changes_chunk)} ###")
+
+      Task.async(fn ->
+        insert_changes_list(repo, changes_chunk, options)
+      end)
+    end)
+    |> Task.yield_many(:timer.seconds(60))
+    |> Enum.reduce_while({:ok, []}, fn {_task, res}, {:ok, acc} ->
+      # Logger.info("### #{inspect(module)} insert/update result #{inspect(res)} ###")
+
+      case res do
+        {:ok, {:ok, result}} ->
+          new_acc = if result, do: result ++ acc, else: acc
+          {:cont, {:ok, new_acc}}
+
+        error ->
+          {:halt, error}
+      end
+    end)
+  end
+
   defp timestamp_changes_list(changes_list, timestamps) when is_list(changes_list) do
     Enum.map(changes_list, &timestamp_params(&1, timestamps))
   end
@@ -337,14 +365,32 @@ defmodule Explorer.Chain.Import do
   end
 
   defp logged_import(multis, options) when is_list(multis) and is_map(options) do
+    # Logger.info("### logged_import ###")
     import_id = :erlang.unique_integer([:positive])
 
     Explorer.Logger.metadata(fn -> import_transactions(multis, options) end, import_id: import_id)
   end
 
   defp import_transactions(multis, options) when is_list(multis) and is_map(options) do
-    Enum.reduce_while(multis, {:ok, %{}}, fn multi, {:ok, acc_changes} ->
-      case import_transaction(multi, options) do
+    # Logger.info("### import_transactions with options keys #{inspect(Map.keys(options))} ###")
+    # Logger.info("### multis length #{Enum.count(multis)} ###")
+    # Logger.info("### multis #{inspect(multis)} ###")
+
+    grouped_multis =
+      multis
+      |> Enum.chunk_by(& &1.names)
+
+    # Logger.info("### grouped_multis length #{inspect(Enum.count(grouped_multis))} ###")
+    # Logger.info("### grouped_multis #{inspect(grouped_multis)} ###")
+
+    grouped_multis
+    |> Enum.map(fn group ->
+      multis_group_reducer(group, options)
+    end)
+    |> Enum.reduce_while({:ok, %{}}, fn res, {:ok, acc_changes} ->
+      # Logger.info("### import_transactions results #{inspect(res)} ###")
+
+      case res do
         {:ok, changes} -> {:cont, {:ok, Map.merge(acc_changes, changes)}}
         {:error, _, _, _} = error -> {:halt, error}
       end
@@ -357,7 +403,38 @@ defmodule Explorer.Chain.Import do
       end
   end
 
+  defp multis_group_reducer(group, options) do
+    group
+    |> Enum.map(fn multi ->
+      Task.async(fn ->
+        import_transaction(multi, options)
+      end)
+    end)
+    |> Task.yield_many(:timer.seconds(60))
+    |> Enum.map(fn {_task, res} -> res end)
+    |> Enum.reduce_while({:ok, %{}}, fn res, {:ok, acc_changes} ->
+      case res do
+        {:ok, changes} ->
+          changes_reducer(changes, acc_changes)
+
+        nil ->
+          {:cont, {:ok, acc_changes}}
+      end
+    end)
+  end
+
+  defp changes_reducer(changes, acc_changes) do
+    case changes do
+      {:ok, changes_map} ->
+        {:cont, {:ok, Map.merge(acc_changes, changes_map)}}
+
+      {:error, _, _, _} = error ->
+        {:halt, error}
+    end
+  end
+
   defp import_transaction(multi, options) when is_map(options) do
+    # Logger.info("### import_transaction ###")
     Repo.logged_transaction(multi, timeout: Map.get(options, :timeout, @transaction_timeout))
   end
 

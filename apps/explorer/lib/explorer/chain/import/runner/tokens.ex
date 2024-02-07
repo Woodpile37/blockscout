@@ -4,12 +4,12 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
   """
 
   require Ecto.Query
+  require Logger
 
   import Ecto.Query, only: [from: 2]
 
   alias Ecto.{Multi, Repo}
   alias Explorer.Chain.{Hash, Import, Token}
-  alias Explorer.Prometheus.Instrumenter
 
   @behaviour Import.Runner
 
@@ -22,10 +22,80 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
   @type holder_count :: non_neg_integer()
   @type token_holder_count :: %{contract_address_hash: Hash.Address.t(), count: holder_count()}
 
+  def acquire_contract_address_tokens(repo, contract_address_hashes_and_token_ids) do
+    initial_query_no_token_id =
+      from(token in Token,
+        select: token
+      )
+
+    initial_query_with_token_id =
+      from(token in Token,
+        left_join: instance in Token.Instance,
+        on: token.contract_address_hash == instance.token_contract_address_hash,
+        select: token
+      )
+
+    {query_no_token_id, query_with_token_id} =
+      contract_address_hashes_and_token_ids
+      |> Enum.reduce({initial_query_no_token_id, initial_query_with_token_id}, fn {contract_address_hash, token_id},
+                                                                                  {query_no_token_id,
+                                                                                   query_with_token_id} ->
+        if is_nil(token_id) do
+          {from(
+             token in query_no_token_id,
+             or_where: token.contract_address_hash == ^contract_address_hash
+           ), query_with_token_id}
+        else
+          {query_no_token_id,
+           from(
+             [token, instance] in query_with_token_id,
+             or_where: token.contract_address_hash == ^contract_address_hash and instance.token_id == ^token_id
+           )}
+        end
+      end)
+
+    final_query_no_token_id =
+      if query_no_token_id == initial_query_no_token_id do
+        nil
+      else
+        from(
+          token in query_no_token_id,
+          # Enforce Token ShareLocks order (see docs: sharelocks.md)
+          order_by: [
+            token.contract_address_hash
+          ],
+          lock: "FOR UPDATE"
+        )
+      end
+
+    final_query_with_token_id =
+      if query_with_token_id == initial_query_with_token_id do
+        nil
+      else
+        from(
+          [token, instance] in query_with_token_id,
+          # Enforce Token ShareLocks order (see docs: sharelocks.md)
+          order_by: [
+            token.contract_address_hash,
+            instance.token_id
+          ],
+          lock: "FOR UPDATE"
+        )
+      end
+
+    tokens_no_token_id = (final_query_no_token_id && repo.all(final_query_no_token_id)) || []
+    tokens_with_token_id = (final_query_with_token_id && repo.all(final_query_with_token_id)) || []
+    tokens = tokens_no_token_id ++ tokens_with_token_id
+
+    {:ok, tokens}
+  end
+
   def update_holder_counts_with_deltas(repo, token_holder_count_deltas, %{
         timeout: timeout,
         timestamps: %{updated_at: updated_at}
       }) do
+    Logger.info("### update_holder_counts_with_deltas STARTED")
+    # NOTE that acquire_contract_address_tokens needs to be called before this
     {hashes, deltas} =
       token_holder_count_deltas
       |> Enum.map(fn %{contract_address_hash: contract_address_hash, delta: delta} ->
@@ -33,15 +103,6 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
         {contract_address_hash_bytes, delta}
       end)
       |> Enum.unzip()
-
-    token_query =
-      from(
-        token in Token,
-        where: token.contract_address_hash in ^hashes,
-        select: token.contract_address_hash,
-        order_by: token.contract_address_hash,
-        lock: "FOR NO KEY UPDATE"
-      )
 
     query =
       from(
@@ -53,8 +114,8 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
             ^deltas
           ),
         on: token.contract_address_hash == deltas.contract_address_hash,
-        where: token.contract_address_hash in subquery(token_query),
         where: not is_nil(token.holder_count),
+        # ShareLocks order already enforced by `acquire_contract_address_tokens` (see docs: sharelocks.md)
         update: [
           set: [
             holder_count: token.holder_count + deltas.delta,
@@ -68,6 +129,7 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
       )
 
     {_total, result} = repo.update_all(query, [], timeout: timeout)
+    Logger.info("### update_holder_counts_with_deltas FINISHED")
 
     {:ok, result}
   end
@@ -96,12 +158,7 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
       |> Map.put(:timestamps, timestamps)
 
     Multi.run(multi, :tokens, fn repo, _ ->
-      Instrumenter.block_import_stage_runner(
-        fn -> insert(repo, changes_list, insert_options) end,
-        :block_referencing,
-        :tokens,
-        :tokens
-      )
+      insert(repo, changes_list, insert_options)
     end)
   end
 
@@ -114,6 +171,7 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
           required(:timestamps) => Import.timestamps()
         }) :: {:ok, [Token.t()]}
   def insert(repo, changes_list, %{timeout: timeout, timestamps: timestamps} = options) when is_list(changes_list) do
+    Logger.info(["### Tokens insert started ###"])
     on_conflict = Map.get_lazy(options, :on_conflict, &default_on_conflict/0)
 
     ordered_changes_list =
@@ -123,7 +181,7 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
       # Enforce Token ShareLocks order (see docs: sharelocks.md)
       |> Enum.sort_by(& &1.contract_address_hash)
 
-    {:ok, _} =
+    {:ok, tokens} =
       Import.insert_changes_list(
         repo,
         ordered_changes_list,
@@ -134,75 +192,42 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
         timeout: timeout,
         timestamps: timestamps
       )
+
+    Logger.info(["### Tokens insert FINISHED ###"])
+    {:ok, tokens}
   end
 
-  if Application.compile_env(:explorer, Explorer.Chain.BridgedToken)[:enabled] do
-    def default_on_conflict do
-      from(
-        token in Token,
-        update: [
-          set: [
-            name: fragment("COALESCE(EXCLUDED.name, ?)", token.name),
-            symbol: fragment("COALESCE(EXCLUDED.symbol, ?)", token.symbol),
-            total_supply: fragment("COALESCE(EXCLUDED.total_supply, ?)", token.total_supply),
-            decimals: fragment("COALESCE(EXCLUDED.decimals, ?)", token.decimals),
-            type: fragment("COALESCE(EXCLUDED.type, ?)", token.type),
-            cataloged: fragment("COALESCE(EXCLUDED.cataloged, ?)", token.cataloged),
-            bridged: fragment("COALESCE(EXCLUDED.bridged, ?)", token.bridged),
-            skip_metadata: fragment("COALESCE(EXCLUDED.skip_metadata, ?)", token.skip_metadata),
-            # `holder_count` is not updated as a pre-existing token means the `holder_count` is already initialized OR
-            #   need to be migrated with `priv/repo/migrations/scripts/update_new_tokens_holder_count_in_batches.sql.exs`
-            # Don't update `contract_address_hash` as it is the primary key and used for the conflict target
-            inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", token.inserted_at),
-            updated_at: fragment("GREATEST(?, EXCLUDED.updated_at)", token.updated_at)
-          ]
-        ],
-        where:
-          fragment(
-            "(EXCLUDED.name, EXCLUDED.symbol, EXCLUDED.total_supply, EXCLUDED.decimals, EXCLUDED.type, EXCLUDED.cataloged, EXCLUDED.bridged, EXCLUDED.skip_metadata) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?, ?)",
-            token.name,
-            token.symbol,
-            token.total_supply,
-            token.decimals,
-            token.type,
-            token.cataloged,
-            token.bridged,
-            token.skip_metadata
-          )
-      )
-    end
-  else
-    def default_on_conflict do
-      from(
-        token in Token,
-        update: [
-          set: [
-            name: fragment("COALESCE(EXCLUDED.name, ?)", token.name),
-            symbol: fragment("COALESCE(EXCLUDED.symbol, ?)", token.symbol),
-            total_supply: fragment("COALESCE(EXCLUDED.total_supply, ?)", token.total_supply),
-            decimals: fragment("COALESCE(EXCLUDED.decimals, ?)", token.decimals),
-            type: fragment("COALESCE(EXCLUDED.type, ?)", token.type),
-            cataloged: fragment("COALESCE(EXCLUDED.cataloged, ?)", token.cataloged),
-            skip_metadata: fragment("COALESCE(EXCLUDED.skip_metadata, ?)", token.skip_metadata),
-            # `holder_count` is not updated as a pre-existing token means the `holder_count` is already initialized OR
-            #   need to be migrated with `priv/repo/migrations/scripts/update_new_tokens_holder_count_in_batches.sql.exs`
-            # Don't update `contract_address_hash` as it is the primary key and used for the conflict target
-            inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", token.inserted_at),
-            updated_at: fragment("GREATEST(?, EXCLUDED.updated_at)", token.updated_at)
-          ]
-        ],
-        where:
-          fragment(
-            "(EXCLUDED.name, EXCLUDED.symbol, EXCLUDED.total_supply, EXCLUDED.decimals, EXCLUDED.type, EXCLUDED.cataloged, EXCLUDED.skip_metadata) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?)",
-            token.name,
-            token.symbol,
-            token.total_supply,
-            token.decimals,
-            token.type,
-            token.cataloged,
-            token.skip_metadata
-          )
-      )
-    end
+  def default_on_conflict do
+    from(
+      token in Token,
+      update: [
+        set: [
+          name: fragment("EXCLUDED.name"),
+          symbol: fragment("EXCLUDED.symbol"),
+          total_supply: fragment("EXCLUDED.total_supply"),
+          decimals: fragment("EXCLUDED.decimals"),
+          type: fragment("EXCLUDED.type"),
+          cataloged: fragment("EXCLUDED.cataloged"),
+          bridged: fragment("EXCLUDED.bridged"),
+          skip_metadata: fragment("EXCLUDED.skip_metadata"),
+          # `holder_count` is not updated as a pre-existing token means the `holder_count` is already initialized OR
+          #   need to be migrated with `priv/repo/migrations/scripts/update_new_tokens_holder_count_in_batches.sql.exs`
+          inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", token.inserted_at),
+          updated_at: fragment("GREATEST(?, EXCLUDED.updated_at)", token.updated_at)
+        ]
+      ],
+      where:
+        fragment(
+          "(EXCLUDED.name, EXCLUDED.symbol, EXCLUDED.total_supply, EXCLUDED.decimals, EXCLUDED.type, EXCLUDED.cataloged, EXCLUDED.bridged, EXCLUDED.skip_metadata) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?, ?)",
+          token.name,
+          token.symbol,
+          token.total_supply,
+          token.decimals,
+          token.type,
+          token.cataloged,
+          token.bridged,
+          token.skip_metadata
+        )
+    )
   end
 end

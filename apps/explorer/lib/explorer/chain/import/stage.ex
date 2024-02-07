@@ -52,7 +52,22 @@ defmodule Explorer.Chain.Import.Stage do
     changes_list
     |> Stream.chunk_every(chunk_size)
     |> Enum.map(fn changes_chunk ->
-      runner.run(Multi.new(), changes_chunk, options)
+      Task.async(fn ->
+        runner.run(Multi.new(), changes_chunk, options)
+      end)
+    end)
+    |> Task.yield_many(:timer.seconds(60))
+    |> Enum.map(fn {_task, res} ->
+      case res do
+        {:ok, result} ->
+          result
+
+        {:exit, reason} ->
+          raise "Addresses insert/update terminated: #{inspect(reason)}"
+
+        nil ->
+          raise "Addresses insert/update timed out."
+      end
     end)
   end
 
@@ -74,5 +89,59 @@ defmodule Explorer.Chain.Import.Stage do
 
       {new_multi, new_remaining_runner_to_changes_list}
     end)
+  end
+
+  @spec concurrent_multis([Runner.t()], runner_to_changes_list, %{optional(atom()) => term()}) ::
+          {[Multi.t()], runner_to_changes_list}
+  def concurrent_multis(runners, runner_to_changes_list, options) do
+    # IO.inspect("Gimme runner_to_changes_list #{inspect(runner_to_changes_list)}")
+    # IO.inspect("Gimme runner_to_changes_list keys #{inspect(Map.keys(runner_to_changes_list))}")
+
+    {final_changes_list, final_remaining_runner_to_changes_list} =
+      runners
+      |> Enum.reduce({[], runner_to_changes_list}, fn runner, {acc, remaining_runner_to_changes_list} ->
+        {changes_list, new_remaining_runner_to_changes_list} = Map.pop(remaining_runner_to_changes_list, runner)
+
+        # IO.inspect("Gimme runner #{inspect(runner)}")
+        # IO.inspect("Gimme changes_list #{inspect(changes_list)}")
+
+        new_acc =
+          case changes_list do
+            nil ->
+              [{runner, []} | acc]
+
+            _ ->
+              [{runner, changes_list} | acc]
+          end
+
+        # {new_multi, new_remaining_runner_to_changes_list}
+        {new_acc, new_remaining_runner_to_changes_list}
+      end)
+
+    # IO.inspect("Gimme final_changes_list #{inspect(final_changes_list)}")
+
+    acc =
+      final_changes_list
+      |> Enum.map(fn {runner, changes_chunk} ->
+        if Enum.count(changes_chunk) > 0 do
+          Task.async(fn ->
+            runner.run(Multi.new(), changes_chunk, options)
+          end)
+        else
+          nil
+        end
+      end)
+      |> Enum.filter(& &1)
+      |> Task.yield_many(:timer.seconds(60))
+      |> Enum.reduce([], fn {_task, res}, acc ->
+        case res do
+          {:ok, result} ->
+            [result | acc]
+        end
+      end)
+
+    # IO.inspect("Gimme result of single_multi_2 #{inspect({acc, final_remaining_runner_to_changes_list})}")
+
+    {acc, final_remaining_runner_to_changes_list}
   end
 end

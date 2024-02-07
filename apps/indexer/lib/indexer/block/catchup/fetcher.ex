@@ -23,104 +23,116 @@ defmodule Indexer.Block.Catchup.Fetcher do
 
   alias Ecto.Changeset
   alias Explorer.Chain
-  alias Explorer.Utility.MissingRangesManipulator
   alias Indexer.{Block, Tracer}
-  alias Indexer.Block.Catchup.{Sequence, TaskSupervisor}
+  alias Indexer.Block.Catchup.Sequence
   alias Indexer.Memory.Shrinkable
-  alias Indexer.Prometheus
 
   @behaviour Block.Fetcher
 
-  @shutdown_after :timer.minutes(5)
+  # These are all the *default* values for options.
+  # DO NOT use them directly in the code.  Get options from `state`.
+
+  @blocks_batch_size 4
+  @blocks_concurrency 10
   @sequence_name :block_catchup_sequencer
 
-  defstruct block_fetcher: nil,
+  defstruct blocks_batch_size: @blocks_batch_size,
+            blocks_concurrency: @blocks_concurrency,
+            block_fetcher: nil,
             memory_monitor: nil
+
+  @doc false
+  def default_blocks_batch_size, do: @blocks_batch_size
 
   @doc """
   Required named arguments
 
     * `:json_rpc_named_arguments` - `t:EthereumJSONRPC.json_rpc_named_arguments/0` passed to
         `EthereumJSONRPC.json_rpc/2`.
+
+  The follow options can be overridden:
+
+    * `:blocks_batch_size` - The number of blocks to request in one call to the JSONRPC.  Defaults to
+      `#{@blocks_batch_size}`.  Block requests also include the transactions for those blocks.  *These transactions
+      are not paginated.*
+    * `:blocks_concurrency` - The number of concurrent requests of `:blocks_batch_size` to allow against the JSONRPC.
+      Defaults to #{@blocks_concurrency}.  So, up to `blocks_concurrency * block_batch_size` (defaults to
+      `#{@blocks_concurrency * @blocks_batch_size}`) blocks can be requested from the JSONRPC at once over all
+      connections.  Up to `block_concurrency * receipts_batch_size * receipts_concurrency` (defaults to
+      `#{@blocks_concurrency * Block.Fetcher.default_receipts_batch_size() * Block.Fetcher.default_receipts_batch_size()}`
+      ) receipts can be requested from the JSONRPC at once over all connections.
+
   """
-  def task(state) do
+  def task(
+        %__MODULE__{
+          blocks_batch_size: blocks_batch_size,
+          block_fetcher: %Block.Fetcher{json_rpc_named_arguments: json_rpc_named_arguments}
+        } = state
+      ) do
     Logger.metadata(fetcher: :block_catchup)
 
-    case MissingRangesManipulator.get_latest_batch() do
-      [] ->
-        %{
-          first_block_number: nil,
-          last_block_number: nil,
-          missing_block_count: 0,
-          shrunk: false
-        }
+    with {:ok, latest_block_number} <- fetch_last_block(json_rpc_named_arguments) do
+      case latest_block_number do
+        # let realtime indexer get the genesis block
+        0 ->
+          %{first_block_number: 0, missing_block_count: 0, last_block_number: 0, shrunk: false}
 
-      latest_missing_ranges ->
-        missing_ranges = filter_consensus_blocks(latest_missing_ranges)
+        _ ->
+          # realtime indexer gets the current latest block
+          first = latest_block_number - 1
+          last = last_block()
 
-        first.._ = List.first(missing_ranges)
-        _..last = List.last(missing_ranges)
+          Logger.metadata(first_block_number: first, last_block_number: last)
 
-        Logger.metadata(first_block_number: first, last_block_number: last)
+          missing_ranges = Chain.missing_block_number_ranges(first..last)
 
-        missing_block_count =
-          missing_ranges
-          |> Stream.map(&Enum.count/1)
-          |> Enum.sum()
+          range_count = Enum.count(missing_ranges)
 
-        step = step(first, last, blocks_batch_size())
-        sequence_opts = put_memory_monitor([ranges: missing_ranges, step: step], state)
-        gen_server_opts = [name: @sequence_name]
-        {:ok, sequence} = Sequence.start_link(sequence_opts, gen_server_opts)
-        Sequence.cap(sequence)
+          missing_block_count =
+            missing_ranges
+            |> Stream.map(&Enum.count/1)
+            |> Enum.sum()
 
-        stream_fetch_and_import(state, sequence)
+          Logger.debug(fn -> "Missed blocks in ranges." end,
+            missing_block_range_count: range_count,
+            missing_block_count: missing_block_count
+          )
 
-        shrunk = Shrinkable.shrunk?(sequence)
+          shrunk =
+            case missing_block_count do
+              0 ->
+                false
 
-        %{
-          first_block_number: first,
-          last_block_number: last,
-          missing_block_count: missing_block_count,
-          shrunk: shrunk
-        }
+              _ ->
+                step = step(first, last, blocks_batch_size)
+                sequence_opts = put_memory_monitor([ranges: missing_ranges, step: step], state)
+                gen_server_opts = [name: @sequence_name]
+                {:ok, sequence} = Sequence.start_link(sequence_opts, gen_server_opts)
+                Sequence.cap(sequence)
+
+                stream_fetch_and_import(state, sequence)
+
+                Shrinkable.shrunk?(sequence)
+            end
+
+          %{
+            first_block_number: first,
+            last_block_number: last,
+            missing_block_count: missing_block_count,
+            shrunk: shrunk
+          }
+      end
     end
   end
 
-  defp filter_consensus_blocks(ranges) do
-    filtered_ranges =
-      ranges
-      |> Enum.map(&Chain.missing_block_number_ranges(&1))
-      |> List.flatten()
+  defp fetch_last_block(json_rpc_named_arguments) do
+    case latest_block() do
+      nil ->
+        EthereumJSONRPC.fetch_block_number_by_tag("latest", json_rpc_named_arguments)
 
-    consensus_blocks = ranges_to_numbers(ranges) -- ranges_to_numbers(filtered_ranges)
-
-    consensus_blocks
-    |> numbers_to_ranges()
-    |> MissingRangesManipulator.clear_batch()
-
-    filtered_ranges
-  end
-
-  @doc """
-  The number of blocks to request in one call to the JSONRPC.  Defaults to
-  10.  Block requests also include the transactions for those blocks.  *These transactions
-  are not paginated.
-  """
-  def blocks_batch_size do
-    Application.get_env(:indexer, __MODULE__)[:batch_size]
-  end
-
-  @doc """
-  The number of concurrent requests of `blocks_batch_size` to allow against the JSONRPC.
-  Defaults to 10.  So, up to `blocks_concurrency * block_batch_size` (defaults to
-  `10 * 10`) blocks can be requested from the JSONRPC at once over all
-  connections.  Up to `block_concurrency * receipts_batch_size * receipts_concurrency` (defaults to
-  `#{10 * Block.Fetcher.default_receipts_batch_size() * Block.Fetcher.default_receipts_concurrency()}`
-  ) receipts can be requested from the JSONRPC at once over all connections.
-  """
-  def blocks_concurrency do
-    Application.get_env(:indexer, __MODULE__)[:concurrency]
+      number ->
+        {:ok, number}
+    end
   end
 
   defp step(first, last, blocks_batch_size) do
@@ -165,15 +177,14 @@ defmodule Indexer.Block.Catchup.Fetcher do
     async_import_token_instances(imported)
   end
 
-  defp stream_fetch_and_import(state, sequence)
+  defp stream_fetch_and_import(%__MODULE__{blocks_concurrency: blocks_concurrency} = state, sequence)
        when is_pid(sequence) do
-    ranges = Sequence.build_stream(sequence)
-
-    TaskSupervisor
-    |> Task.Supervisor.async_stream(ranges, &fetch_and_import_range_from_sequence(state, &1, sequence),
-      max_concurrency: blocks_concurrency(),
-      timeout: :infinity,
-      shutdown: @shutdown_after
+    sequence
+    |> Sequence.build_stream()
+    |> Task.async_stream(
+      &fetch_and_import_range_from_sequence(state, &1, sequence),
+      max_concurrency: blocks_concurrency,
+      timeout: :infinity
     )
     |> Stream.run()
   end
@@ -190,22 +201,15 @@ defmodule Indexer.Block.Catchup.Fetcher do
          sequence
        ) do
     Logger.metadata(fetcher: :block_catchup, first_block_number: first, last_block_number: last)
-    Process.flag(:trap_exit, true)
 
-    {fetch_duration, result} = :timer.tc(fn -> fetch_and_import_range(block_fetcher, range) end)
-
-    Prometheus.Instrumenter.block_full_process(fetch_duration, __MODULE__)
-
-    case result do
+    case fetch_and_import_range(block_fetcher, range) do
       {:ok, %{inserted: inserted, errors: errors}} ->
         errors = cap_seq(sequence, errors)
         retry(sequence, errors)
-        clear_missing_ranges(range, errors)
 
         {:ok, inserted: inserted}
 
       {:error, {:import = step, [%Changeset{} | _] = changesets}} = error ->
-        Prometheus.Instrumenter.import_errors()
         Logger.error(fn -> ["failed to validate: ", inspect(changesets), ". Retrying."] end, step: step)
 
         push_back(sequence, range)
@@ -213,7 +217,6 @@ defmodule Indexer.Block.Catchup.Fetcher do
         error
 
       {:error, {:import = step, reason}} = error ->
-        Prometheus.Instrumenter.import_errors()
         Logger.error(fn -> [inspect(reason), ". Retrying."] end, step: step)
 
         push_back(sequence, range)
@@ -247,6 +250,9 @@ defmodule Indexer.Block.Catchup.Fetcher do
   rescue
     exception ->
       Logger.error(fn -> [Exception.format(:error, exception, __STACKTRACE__), ?\n, ?\n, "Retrying."] end)
+
+      push_back(sequence, range)
+
       {:error, exception}
   end
 
@@ -283,14 +289,6 @@ defmodule Indexer.Block.Catchup.Fetcher do
     |> Enum.map(&push_back(sequence, &1))
   end
 
-  defp clear_missing_ranges(initial_range, errors) do
-    success_numbers = Enum.to_list(initial_range) -- Enum.map(errors, &block_error_to_number/1)
-
-    success_numbers
-    |> numbers_to_ranges()
-    |> MissingRangesManipulator.clear_batch()
-  end
-
   defp block_errors_to_block_number_ranges(block_errors) when is_list(block_errors) do
     block_errors
     |> Enum.map(&block_error_to_number/1)
@@ -303,27 +301,21 @@ defmodule Indexer.Block.Catchup.Fetcher do
 
   defp numbers_to_ranges(numbers) when is_list(numbers) do
     numbers
-    |> Enum.sort(&>=/2)
+    |> Enum.sort()
     |> Enum.chunk_while(
       nil,
       fn
         number, nil ->
           {:cont, number..number}
 
-        number, first..last when number == last - 1 ->
+        number, first..last when number == last + 1 ->
           {:cont, first..number}
 
         number, range ->
           {:cont, range, number..number}
       end,
-      fn range -> {:cont, range, nil} end
+      fn range -> {:cont, range} end
     )
-  end
-
-  defp ranges_to_numbers(ranges) do
-    ranges
-    |> Enum.map(&Enum.to_list/1)
-    |> List.flatten()
   end
 
   defp put_memory_monitor(sequence_options, %__MODULE__{memory_monitor: nil}) when is_list(sequence_options),
@@ -341,21 +333,43 @@ defmodule Indexer.Block.Catchup.Fetcher do
   def push_front(block_numbers) do
     if Process.whereis(@sequence_name) do
       Enum.reduce_while(block_numbers, :ok, fn block_number, :ok ->
-        sequence_push_front(block_number)
+        if is_integer(block_number) do
+          case Sequence.push_front(@sequence_name, block_number..block_number) do
+            :ok -> {:cont, :ok}
+            {:error, _} = error -> {:halt, error}
+          end
+        else
+          Logger.warn(fn -> ["Received a non-integer block number: ", inspect(block_number)] end)
+        end
       end)
     else
       {:error, :queue_unavailable}
     end
   end
 
-  defp sequence_push_front(block_number) do
-    if is_integer(block_number) do
-      case Sequence.push_front(@sequence_name, block_number..block_number) do
-        :ok -> {:cont, :ok}
-        {:error, _} = error -> {:halt, error}
-      end
-    else
-      Logger.warn(fn -> ["Received a non-integer block number: ", inspect(block_number)] end)
+  defp last_block do
+    string_value = Application.get_env(:indexer, :first_block)
+
+    case Integer.parse(string_value) do
+      {integer, ""} ->
+        integer
+
+      _ ->
+        min_missing_block_number =
+          "min_missing_block_number"
+          |> Chain.get_last_fetched_counter()
+          |> Decimal.to_integer()
+
+        min_missing_block_number
+    end
+  end
+
+  defp latest_block do
+    string_value = Application.get_env(:indexer, :last_block)
+
+    case Integer.parse(string_value) do
+      {integer, ""} -> integer
+      _ -> nil
     end
   end
 end

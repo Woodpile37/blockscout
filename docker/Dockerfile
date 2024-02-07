@@ -1,28 +1,30 @@
-FROM hexpm/elixir:1.14.5-erlang-24.2.2-alpine-3.18.2 AS builder
+FROM bitwalker/alpine-elixir-phoenix:1.12
 
-WORKDIR /app
+RUN apk --no-cache --update add alpine-sdk gmp-dev automake libtool inotify-tools autoconf python3 file
 
-ENV MIX_ENV="prod"
-
-RUN apk --no-cache --update add alpine-sdk gmp-dev automake libtool inotify-tools autoconf python3 file gcompat
+ENV GLIBC_REPO=https://github.com/sgerrand/alpine-pkg-glibc
+ENV GLIBC_VERSION=2.30-r0
 
 RUN set -ex && \
-    apk --update add libstdc++ curl ca-certificates gcompat
+    apk --update add libstdc++ curl ca-certificates && \
+    for pkg in glibc-${GLIBC_VERSION} glibc-bin-${GLIBC_VERSION}; \
+        do curl -sSL ${GLIBC_REPO}/releases/download/${GLIBC_VERSION}/${pkg}.apk -o /tmp/${pkg}.apk; done && \
+    apk add --allow-untrusted /tmp/*.apk && \
+    rm -v /tmp/*.apk && \
+    /usr/glibc-compat/sbin/ldconfig /lib /usr/glibc-compat/lib
 
-ARG CACHE_EXCHANGE_RATES_PERIOD
-ARG API_V1_READ_METHODS_DISABLED
-ARG DISABLE_WEBAPP
-ARG API_V1_WRITE_METHODS_DISABLED
-ARG CACHE_TOTAL_GAS_USAGE_COUNTER_ENABLED
-ARG ADMIN_PANEL_ENABLED
-ARG CACHE_ADDRESS_WITH_BALANCES_UPDATE_INTERVAL
-ARG SESSION_COOKIE_DOMAIN
-ARG MIXPANEL_TOKEN
-ARG MIXPANEL_URL
-ARG AMPLITUDE_API_KEY
-ARG AMPLITUDE_URL
-ARG CHAIN_TYPE
-ENV CHAIN_TYPE=${CHAIN_TYPE}
+# Get Rust
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+ENV PATH="$HOME/.cargo/bin:${PATH}"
+ENV RUSTFLAGS="-C target-feature=-crt-static"
+
+EXPOSE 4000
+
+ENV MIX_ENV="prod"
+ENV SOCKET_ROOT="/eth/mainnet"
+ENV NETWORK_PATH="/eth/mainnet"
+ENV CHAIN_ID="1"
 
 # Cache elixir deps
 ADD mix.exs mix.lock ./
@@ -31,53 +33,26 @@ ADD apps/explorer/mix.exs ./apps/explorer/
 ADD apps/ethereum_jsonrpc/mix.exs ./apps/ethereum_jsonrpc/
 ADD apps/indexer/mix.exs ./apps/indexer/
 
-ENV MIX_HOME=/opt/mix
-RUN mix local.hex --force
 RUN HEX_HTTP_TIMEOUT=3600 mix do deps.get, local.rebar --force, deps.compile
 
-ADD apps ./apps
-ADD config ./config
-ADD rel ./rel
-ADD *.exs ./
+ADD . .
 
-RUN apk add --update nodejs npm
+ARG COIN
+RUN if [ "$COIN" != "" ]; then sed -i s/"POA"/"${COIN}"/g apps/block_scout_web/priv/gettext/en/LC_MESSAGES/default.po; fi
 
 # Run forderground build and phoenix digest
-RUN mix compile && npm install npm@latest
+RUN mix compile
+
+RUN npm install npm@latest
 
 # Add blockscout npm deps
 RUN cd apps/block_scout_web/assets/ && \
     npm install && \
     npm run deploy && \
-    cd /app/apps/explorer/ && \
+    cd -
+
+RUN cd apps/explorer/ && \
     npm install && \
-    apk update && \
-    apk del --force-broken-world alpine-sdk gmp-dev automake libtool inotify-tools autoconf python3
-
-
-RUN apk add --update git make 
+    apk update && apk del --force-broken-world alpine-sdk gmp-dev automake libtool inotify-tools autoconf python3
 
 RUN mix phx.digest
-
-RUN mkdir -p /opt/release \
-  && mix release blockscout \
-  && mv _build/${MIX_ENV}/rel/blockscout /opt/release
-
-##############################################################
-FROM hexpm/elixir:1.14.5-erlang-24.2.2-alpine-3.18.2
-
-ARG RELEASE_VERSION
-ENV RELEASE_VERSION=${RELEASE_VERSION}
-ARG CHAIN_TYPE
-ENV CHAIN_TYPE=${CHAIN_TYPE}
-ARG BLOCKSCOUT_VERSION
-ENV BLOCKSCOUT_VERSION=${BLOCKSCOUT_VERSION}
-
-RUN apk --no-cache --update add jq curl
-
-WORKDIR /app
-
-COPY --from=builder /opt/release/blockscout .
-COPY --from=builder /app/apps/explorer/node_modules ./node_modules
-COPY --from=builder /app/config/config_helper.exs ./config/config_helper.exs
-COPY --from=builder /app/config/config_helper.exs /app/releases/${RELEASE_VERSION}/config_helper.exs

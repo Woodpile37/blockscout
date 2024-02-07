@@ -1,4 +1,4 @@
-defmodule BlockScoutWeb.CurrencyHelper do
+defmodule BlockScoutWeb.CurrencyHelpers do
   @moduledoc """
   Helper functions for interacting with `t:BlockScoutWeb.ExchangeRates.USD.t/0` values.
   """
@@ -10,16 +10,10 @@ defmodule BlockScoutWeb.CurrencyHelper do
 
   ## Examples
 
-      iex> BlockScoutWeb.CurrencyHelper.format_integer_to_currency(1000000)
+      iex> BlockScoutWeb.CurrencyHelpers.format_integer_to_currency(1000000)
       "1,000,000"
   """
-  @spec format_integer_to_currency(non_neg_integer() | nil) :: String.t()
-  def format_integer_to_currency(value)
-
-  def format_integer_to_currency(nil) do
-    "-"
-  end
-
+  @spec format_integer_to_currency(non_neg_integer()) :: String.t()
   def format_integer_to_currency(value) do
     {:ok, formatted} = Number.to_string(value, format: "#,##0")
 
@@ -75,12 +69,17 @@ defmodule BlockScoutWeb.CurrencyHelper do
 
   @spec format_according_to_decimals(Decimal.t(), Decimal.t()) :: String.t()
   def format_according_to_decimals(value, decimals) do
-    if Decimal.compare(decimals, 24) == :gt do
-      format_according_to_decimals(value, Decimal.new(18))
-    else
-      value
-      |> divide_decimals(decimals)
-      |> thousands_separator()
+    cond do
+      decimals == Decimal.new(0) ->
+        value
+
+      Decimal.cmp(decimals, 24) == :gt ->
+        format_according_to_decimals(value, Decimal.new(18))
+
+      true ->
+        value
+        |> divide_decimals(decimals)
+        |> thousands_separator()
     end
   end
 

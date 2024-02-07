@@ -4,6 +4,7 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalances do
   """
 
   require Ecto.Query
+  require Logger
 
   import Ecto.Query, only: [from: 2]
 
@@ -52,6 +53,8 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalances do
                value: Decimal.t()
              }
   def token_holder_count_deltas(%{deleted: deleted, inserted: inserted}) when is_list(deleted) and is_list(inserted) do
+    # Logger.info("### Blocks token_holder_count_deltas started ###")
+
     deleted_holder_address_hash_set_by_token_contract_address_hash =
       to_holder_address_hash_set_by_token_contract_address_hash(deleted)
 
@@ -82,6 +85,8 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalances do
           [%{contract_address_hash: token_contract_address_hash, delta: holder_count_delta}]
       end
     end)
+
+    # Logger.info("### Blocks token_holder_count_deltas FINISHED ###")
   end
 
   @impl Import.Runner
@@ -100,6 +105,8 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalances do
 
   @impl Import.Runner
   def run(multi, changes_list, %{timestamps: timestamps} = options) do
+    Logger.info("### Address_current_token_balances tun STARTED changes_list length #{Enum.count(changes_list)} ###")
+
     insert_options =
       options
       |> Map.get(option_key(), %{})
@@ -206,8 +213,12 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalances do
           | {:error, [Changeset.t()]}
   defp insert(repo, changes_list, %{timeout: timeout, timestamps: timestamps} = options)
        when is_atom(repo) and is_list(changes_list) do
+    Logger.info("### Address_current_token_balances insert started changes_list length #{Enum.count(changes_list)} ###")
+
     inserted_changes_list =
       insert_changes_list_with_and_without_token_id(changes_list, repo, timestamps, timeout, options)
+
+    Logger.info("### Address_current_token_balances insert FINISHED ###")
 
     {:ok, inserted_changes_list}
   end

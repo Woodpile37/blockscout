@@ -4,6 +4,7 @@ defmodule Explorer.Chain.Import.Runner.Logs do
   """
 
   require Ecto.Query
+  require Logger
 
   alias Ecto.{Changeset, Multi, Repo}
   alias Explorer.Chain.{Import, Log}
@@ -62,12 +63,13 @@ defmodule Explorer.Chain.Import.Runner.Logs do
           {:ok, [Log.t()]}
           | {:error, [Changeset.t()]}
   defp insert(repo, changes_list, %{timeout: timeout, timestamps: timestamps} = options) when is_list(changes_list) do
+    Logger.info(["### Logs insert started ###"])
     on_conflict = Map.get_lazy(options, :on_conflict, &default_on_conflict/0)
 
     # Enforce Log ShareLocks order (see docs: sharelocks.md)
     ordered_changes_list = Enum.sort_by(changes_list, &{&1.transaction_hash, &1.block_hash, &1.index})
 
-    {:ok, _} =
+    {:ok, logs} =
       Import.insert_changes_list(
         repo,
         ordered_changes_list,
@@ -78,6 +80,9 @@ defmodule Explorer.Chain.Import.Runner.Logs do
         timeout: timeout,
         timestamps: timestamps
       )
+
+    Logger.info(["### Logs insert FINISHED ###"])
+    {:ok, logs}
   end
 
   defp default_on_conflict do

@@ -4,13 +4,13 @@ defmodule Explorer.Chain.Import.Runner.Address.CoinBalancesDaily do
   """
 
   require Ecto.Query
+  require Logger
 
   import Ecto.Query, only: [from: 2]
 
   alias Ecto.{Changeset, Multi, Repo}
   alias Explorer.Chain.Address.CoinBalanceDaily
   alias Explorer.Chain.{Hash, Import, Wei}
-  alias Explorer.Prometheus.Instrumenter
 
   @behaviour Import.Runner
 
@@ -37,6 +37,8 @@ defmodule Explorer.Chain.Import.Runner.Address.CoinBalancesDaily do
 
   @impl Import.Runner
   def run(multi, changes_list, %{timestamps: timestamps} = options) do
+    Logger.info("### Address_coin_balances_daily run STARTED changes_list length #{Enum.count(changes_list)} ###")
+
     insert_options =
       options
       |> Map.get(option_key(), %{})
@@ -45,12 +47,7 @@ defmodule Explorer.Chain.Import.Runner.Address.CoinBalancesDaily do
       |> Map.put(:timestamps, timestamps)
 
     Multi.run(multi, :address_coin_balances_daily, fn repo, _ ->
-      Instrumenter.block_import_stage_runner(
-        fn -> insert(repo, changes_list, insert_options) end,
-        :address_referencing,
-        :coin_balances_daily,
-        :address_coin_balances_daily
-      )
+      insert(repo, changes_list, insert_options)
     end)
   end
 
@@ -75,17 +72,36 @@ defmodule Explorer.Chain.Import.Runner.Address.CoinBalancesDaily do
           {:ok, [%{required(:address_hash) => Hash.Address.t(), required(:day) => Date.t()}]}
           | {:error, [Changeset.t()]}
   defp insert(repo, changes_list, %{timeout: timeout, timestamps: timestamps} = options) when is_list(changes_list) do
+    Logger.info("### Address_coin_balances_daily insert started changes_list length #{Enum.count(changes_list)} ###")
     on_conflict = Map.get_lazy(options, :on_conflict, &default_on_conflict/0)
 
-    combined_changes = changes_list |> Enum.reduce(%{}, &compose_change/2)
+    combined_changes_list =
+      changes_list
+      |> Enum.group_by(fn %{
+                            address_hash: address_hash,
+                            day: day
+                          } ->
+        {address_hash, day}
+      end)
+      |> Enum.map(fn {_, grouped_address_coin_balances} ->
+        Enum.max_by(grouped_address_coin_balances, fn daily_balance ->
+          case daily_balance do
+            %{value: value} -> value
+            _ -> nil
+          end
+        end)
+      end)
 
     # Enforce CoinBalanceDaily ShareLocks order (see docs: sharelocks.md)
-    ordered_changes_list = combined_changes |> Map.values() |> Enum.sort_by(&{&1.address_hash, &1.day})
+    ordered_changes_list = Enum.sort_by(combined_changes_list, &{&1.address_hash, &1.day})
 
+    # Import.insert_changes_list_in_batches(
     {:ok, _} =
       Import.insert_changes_list(
+        # __MODULE__,
         repo,
         ordered_changes_list,
+        # 100,
         conflict_target: [:address_hash, :day],
         on_conflict: on_conflict,
         for: CoinBalanceDaily,
@@ -93,18 +109,9 @@ defmodule Explorer.Chain.Import.Runner.Address.CoinBalancesDaily do
         timestamps: timestamps
       )
 
-    {:ok, Enum.map(ordered_changes_list, &Map.take(&1, ~w(address_hash day)a))}
-  end
+    Logger.info("### Address_coin_balances_daily insert FINISHED ###")
 
-  defp compose_change(change, acc) do
-    Map.update(acc, {change.address_hash, change.day}, change, fn existing_change ->
-      if Map.has_key?(change, :value) && Map.has_key?(existing_change, :value) &&
-           change.value > existing_change.value do
-        change
-      else
-        existing_change
-      end
-    end)
+    {:ok, Enum.map(ordered_changes_list, &Map.take(&1, ~w(address_hash day)a))}
   end
 
   def default_on_conflict do
@@ -115,13 +122,12 @@ defmodule Explorer.Chain.Import.Runner.Address.CoinBalancesDaily do
           value:
             fragment(
               """
-              CASE WHEN EXCLUDED.value IS NOT NULL AND (? IS NULL OR EXCLUDED.value > ?) THEN
+              CASE WHEN EXCLUDED.value IS NOT NULL AND EXCLUDED.value > ? THEN
                      EXCLUDED.value
                    ELSE
                      ?
               END
               """,
-              balance.value,
               balance.value,
               balance.value
             ),

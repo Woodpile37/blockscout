@@ -1,68 +1,56 @@
-import Config
+use Mix.Config
 
 # Configures the database
 config :explorer, Explorer.Repo,
+  url: System.get_env("DATABASE_URL"),
+  pool_size: String.to_integer(System.get_env("POOL_SIZE", "50")),
+  ssl: String.equivalent?(System.get_env("ECTO_USE_SSL") || "true", "true"),
   prepare: :unnamed,
   timeout: :timer.seconds(60),
-  migration_lock: nil
+  queue_target: 2000
+
+database_api_url =
+  if System.get_env("DATABASE_READ_ONLY_API_URL"),
+    do: System.get_env("DATABASE_READ_ONLY_API_URL"),
+    else: System.get_env("DATABASE_URL")
 
 # Configures API the database
 config :explorer, Explorer.Repo.Replica1,
-  prepare: :unnamed,
-  timeout: :timer.seconds(60)
-
-# Configures Account database
-config :explorer, Explorer.Repo.Account,
-  prepare: :unnamed,
-  timeout: :timer.seconds(60)
-
-config :explorer, Explorer.Repo.PolygonEdge,
-  prepare: :unnamed,
-  timeout: :timer.seconds(60)
-
-config :explorer, Explorer.Repo.PolygonZkevm,
-  prepare: :unnamed,
-  timeout: :timer.seconds(60)
-
-config :explorer, Explorer.Repo.ZkSync,
-  prepare: :unnamed,
-  timeout: :timer.seconds(60)
-
-config :explorer, Explorer.Repo.RSK,
-  prepare: :unnamed,
-  timeout: :timer.seconds(60)
-
-config :explorer, Explorer.Repo.Shibarium,
-  prepare: :unnamed,
-  timeout: :timer.seconds(60)
-
-config :explorer, Explorer.Repo.Suave,
-  prepare: :unnamed,
-  timeout: :timer.seconds(60)
-
-config :explorer, Explorer.Repo.Arbitrum,
-  prepare: :unnamed,
-  timeout: :timer.seconds(60)
-
-config :explorer, Explorer.Repo.BridgedTokens,
+  url: database_api_url,
+  pool_size: String.to_integer(System.get_env("POOL_SIZE_API", "50")),
+  ssl: String.equivalent?(System.get_env("ECTO_USE_SSL") || "true", "true"),
   prepare: :unnamed,
   timeout: :timer.seconds(60)
 
 config :explorer, Explorer.Tracer, env: "production", disabled?: true
 
 config :logger, :explorer,
-  level: :info,
+  level: :debug,
   path: Path.absname("logs/prod/explorer.log"),
-  rotate: %{max_bytes: 52_428_800, keep: 5}
+  rotate: %{max_bytes: 52_428_800, keep: 19}
 
 config :logger, :reading_token_functions,
   level: :debug,
   path: Path.absname("logs/prod/explorer/tokens/reading_functions.log"),
   metadata_filter: [fetcher: :token_functions],
-  rotate: %{max_bytes: 52_428_800, keep: 5}
+  rotate: %{max_bytes: 52_428_800, keep: 19}
 
 config :logger, :token_instances,
   level: :debug,
   path: Path.absname("logs/prod/explorer/tokens/token_instances.log"),
   metadata_filter: [fetcher: :token_instances],
-  rotate: %{max_bytes: 52_428_800, keep: 5}
+  rotate: %{max_bytes: 52_428_800, keep: 19}
+
+variant =
+  if is_nil(System.get_env("ETHEREUM_JSONRPC_VARIANT")) do
+    "parity"
+  else
+    System.get_env("ETHEREUM_JSONRPC_VARIANT")
+    |> String.split(".")
+    |> List.last()
+    |> String.downcase()
+  end
+
+# Import variant specific config. This must remain at the bottom
+# of this file so it overrides the configuration defined above.
+import_config "prod/#{variant}.exs"

@@ -4,6 +4,7 @@ defmodule Explorer.Chain.Import.Runner.Address.CoinBalances do
   """
 
   require Ecto.Query
+  require Logger
 
   import Ecto.Query, only: [from: 2]
 
@@ -37,6 +38,8 @@ defmodule Explorer.Chain.Import.Runner.Address.CoinBalances do
 
   @impl Import.Runner
   def run(multi, changes_list, %{timestamps: timestamps} = options) do
+    Logger.info("### Address_coin_balances run STARTED changes_list length #{Enum.count(changes_list)} ###")
+
     insert_options =
       options
       |> Map.get(option_key(), %{})
@@ -75,6 +78,7 @@ defmodule Explorer.Chain.Import.Runner.Address.CoinBalances do
           {:ok, [%{required(:address_hash) => Hash.Address.t(), required(:block_number) => Block.block_number()}]}
           | {:error, [Changeset.t()]}
   defp insert(repo, changes_list, %{timeout: timeout, timestamps: timestamps} = options) when is_list(changes_list) do
+    Logger.info("### Address_coin_balances insert started changes_list length #{Enum.count(changes_list)} ###")
     on_conflict = Map.get_lazy(options, :on_conflict, &default_on_conflict/0)
 
     # Enforce CoinBalance ShareLocks order (see docs: sharelocks.md)
@@ -83,16 +87,21 @@ defmodule Explorer.Chain.Import.Runner.Address.CoinBalances do
       |> Enum.sort_by(&{&1.address_hash, &1.block_number})
       |> Enum.dedup()
 
+    # Import.insert_changes_list_in_batches(
     {:ok, _} =
       Import.insert_changes_list(
+        # __MODULE__,
         repo,
         ordered_changes_list,
+        # 100,
         conflict_target: [:address_hash, :block_number],
         on_conflict: on_conflict,
         for: CoinBalance,
         timeout: timeout,
         timestamps: timestamps
       )
+
+    Logger.info("### Address_coin_balances insert FINISHED changes_list length #{Enum.count(changes_list)} ###")
 
     {:ok, Enum.map(ordered_changes_list, &Map.take(&1, ~w(address_hash block_number)a))}
   end

@@ -5,14 +5,15 @@ defmodule Indexer.Block.FetcherTest do
 
   import Mox
   import EthereumJSONRPC, only: [integer_to_quantity: 1]
+  import EthereumJSONRPC.Case
 
   alias Explorer.Chain
   alias Explorer.Chain.{Address, Log, Transaction, Wei}
   alias Indexer.Block.Fetcher
   alias Indexer.BufferedTask
-  alias Indexer.Fetcher.CoinBalance.Catchup, as: CoinBalanceCatchup
 
   alias Indexer.Fetcher.{
+    CoinBalance,
     ContractCode,
     InternalTransaction,
     ReplacedTransaction,
@@ -49,7 +50,7 @@ defmodule Indexer.Block.FetcherTest do
 
   describe "import_range/2" do
     setup %{json_rpc_named_arguments: json_rpc_named_arguments} do
-      CoinBalanceCatchup.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
+      CoinBalance.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
       ContractCode.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
       InternalTransaction.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
       Token.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
@@ -82,7 +83,7 @@ defmodule Indexer.Block.FetcherTest do
     #     res = eth_block_number_fake_response(block_quantity)
 
     #     case Keyword.fetch!(json_rpc_named_arguments, :variant) do
-    #       EthereumJSONRPC.Nethermind ->
+    #       EthereumJSONRPC.Parity ->
     #         EthereumJSONRPC.Mox
     #         |> expect(:json_rpc, fn [%{id: id, method: "eth_getBlockByNumber", params: [^block_quantity, true]}],
     #                                 _options ->
@@ -219,7 +220,7 @@ defmodule Indexer.Block.FetcherTest do
     #           }
     #         }
 
-    #       EthereumJSONRPC.Nethermind ->
+    #       EthereumJSONRPC.Parity ->
     #         %{
     #           address_hash: %Explorer.Chain.Hash{
     #             byte_count: 20,
@@ -273,7 +274,7 @@ defmodule Indexer.Block.FetcherTest do
 
       if json_rpc_named_arguments[:transport] == EthereumJSONRPC.Mox do
         case Keyword.fetch!(json_rpc_named_arguments, :variant) do
-          EthereumJSONRPC.Nethermind ->
+          EthereumJSONRPC.Parity ->
             block_quantity = integer_to_quantity(block_number)
             from_address_hash = "0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca"
             to_address_hash = "0x8bf38d4764929064f2d4d3a56520a76ab3df415b"
@@ -375,7 +376,8 @@ defmodule Indexer.Block.FetcherTest do
                          "topics" => ["0x600bcf04a13e752d1e3670a5a9f1c21177ca2a93c6f5391d4f1298d098097c22"],
                          "transactionHash" => "0x53bd884872de3e488692881baeec262e7b95234d3965248c39fe992fffd433e5",
                          "transactionIndex" => "0x0",
-                         "transactionLogIndex" => "0x0"
+                         "transactionLogIndex" => "0x0",
+                         "type" => "mined"
                        }
                      ],
                      "logsBloom" =>
@@ -581,7 +583,7 @@ defmodule Indexer.Block.FetcherTest do
                   }} = Fetcher.fetch_and_import_range(block_fetcher, block_number..block_number)
 
           wait_for_tasks(InternalTransaction)
-          wait_for_tasks(CoinBalanceCatchup)
+          wait_for_tasks(CoinBalance)
 
           assert Repo.aggregate(Block, :count, :hash) == 1
           assert Repo.aggregate(Address, :count, :hash) == 5
@@ -613,7 +615,7 @@ defmodule Indexer.Block.FetcherTest do
           assert fifth_address.fetched_coin_balance == %Wei{value: Decimal.new(930_417_572_224_879_702_000)}
           assert fifth_address.fetched_coin_balance_block_number == block_number
 
-        EthereumJSONRPC.Nethermind ->
+        EthereumJSONRPC.Parity ->
           assert {:ok,
                   %{
                     inserted: %{
@@ -675,7 +677,7 @@ defmodule Indexer.Block.FetcherTest do
                   }} = Fetcher.fetch_and_import_range(block_fetcher, block_number..block_number)
 
           wait_for_tasks(InternalTransaction)
-          wait_for_tasks(CoinBalanceCatchup)
+          wait_for_tasks(CoinBalance)
 
           assert Repo.aggregate(Chain.Block, :count, :hash) == 1
           assert Repo.aggregate(Address, :count, :hash) == 2
@@ -743,7 +745,7 @@ defmodule Indexer.Block.FetcherTest do
 
              %{id: id, method: "trace_block"} ->
                block_quantity = integer_to_quantity(block_number)
-               _res = eth_block_number_fake_response(block_quantity)
+               res = eth_block_number_fake_response(block_quantity)
 
                %{
                  id: id,
@@ -790,8 +792,10 @@ defmodule Indexer.Block.FetcherTest do
         end)
       end
 
-      assert {:ok, %{errors: [], inserted: %{block_rewards: _block_rewards}}} =
+      assert {:ok, %{errors: [], inserted: _}} =
                Fetcher.fetch_and_import_range(block_fetcher, block_number..block_number)
+
+      Process.sleep(1000)
 
       assert Repo.one!(select(Chain.Block.Reward, fragment("COUNT(*)"))) == 2
     end
