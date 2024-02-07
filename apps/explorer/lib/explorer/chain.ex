@@ -56,11 +56,6 @@ defmodule Explorer.Chain do
     Import,
     InternalTransaction,
     Log,
-    OptimismDeposit,
-    OptimismOutputRoot,
-    OptimismTxnBatch,
-    OptimismWithdrawal,
-    OptimismWithdrawalEvent,
     PendingBlockOperation,
     SmartContract,
     Token,
@@ -71,15 +66,12 @@ defmodule Explorer.Chain do
     Withdrawal
   }
 
-  alias Explorer.Chain.Block.{EmissionReward, Reward}
-
   alias Explorer.Chain.Cache.{
     BlockNumber,
     Blocks,
     ContractsCounter,
     NewContractsCounter,
     NewVerifiedContractsCounter,
-    OptimismFinalizationPeriod,
     Transactions,
     Uncles,
     VerifiedContractsCounter,
@@ -87,7 +79,6 @@ defmodule Explorer.Chain do
   }
 
   alias Explorer.Chain.Cache.Block, as: BlockCache
-  alias Explorer.Chain.Cache.Helper, as: CacheHelper
   alias Explorer.Chain.Cache.PendingBlockOperation, as: PendingBlockOperationCache
   alias Explorer.Chain.Fetcher.{CheckBytecodeMatchingOnDemand, LookUpSmartContractSourcesOnDemand}
   alias Explorer.Chain.Import.Runner
@@ -483,115 +474,6 @@ defmodule Explorer.Chain do
   end
 
   @doc """
-  Reward for mining a block.
-
-  The block reward is the sum of the following:
-
-  * Sum of the transaction fees (gas_used * gas_price) for the block
-  * A static reward for miner (this value may change during the life of the chain)
-  * The reward for uncle blocks (1/32 * static_reward * number_of_uncles)
-
-  *NOTE*
-
-  Uncles are not currently accounted for.
-  """
-  @spec block_reward(Block.block_number()) :: Wei.t()
-  def block_reward(block_number) do
-    block_hash =
-      Block
-      |> where([block], block.number == ^block_number and block.consensus == true)
-      |> select([block], block.hash)
-      |> Repo.one!()
-
-    case Repo.one!(
-           from(reward in Reward,
-             where: reward.block_hash == ^block_hash,
-             select: %Wei{
-               value: coalesce(sum(reward.reward), 0)
-             }
-           )
-         ) do
-      %Wei{
-        value: %Decimal{coef: 0}
-      } ->
-        Repo.one!(
-          from(block in Block,
-            left_join: transaction in assoc(block, :transactions),
-            inner_join: emission_reward in EmissionReward,
-            on: fragment("? <@ ?", block.number, emission_reward.block_range),
-            where: block.number == ^block_number and block.consensus == true,
-            group_by: [emission_reward.reward, block.hash],
-            select: %Wei{
-              value: coalesce(sum(transaction.gas_used * transaction.gas_price), 0) + emission_reward.reward
-            }
-          )
-        )
-
-      other_value ->
-        other_value
-    end
-  end
-
-  def txn_fees(transactions) do
-    Enum.reduce(transactions, Decimal.new(0), fn %{gas_used: gas_used, gas_price: gas_price}, acc ->
-      gas_used
-      |> Decimal.new()
-      |> Decimal.mult(gas_price_to_decimal(gas_price))
-      |> Decimal.add(acc)
-    end)
-  end
-
-  defp gas_price_to_decimal(%Wei{} = wei), do: wei.value
-  defp gas_price_to_decimal(gas_price), do: Decimal.new(gas_price)
-
-  def burned_fees(transactions, base_fee_per_gas) do
-    burned_fee_counter =
-      transactions
-      |> Enum.reduce(Decimal.new(0), fn %{gas_used: gas_used}, acc ->
-        gas_used
-        |> Decimal.new()
-        |> Decimal.add(acc)
-      end)
-
-    base_fee_per_gas && Wei.mult(base_fee_per_gas_to_wei(base_fee_per_gas), burned_fee_counter)
-  end
-
-  defp base_fee_per_gas_to_wei(%Wei{} = wei), do: wei
-  defp base_fee_per_gas_to_wei(base_fee_per_gas), do: %Wei{value: Decimal.new(base_fee_per_gas)}
-
-  @uncle_reward_coef 1 / 32
-  def block_reward_by_parts(block, transactions) do
-    %{hash: block_hash, number: block_number} = block
-    base_fee_per_gas = Map.get(block, :base_fee_per_gas)
-
-    txn_fees = txn_fees(transactions)
-
-    static_reward =
-      Repo.one(
-        from(
-          er in EmissionReward,
-          where: fragment("int8range(?, ?) <@ ?", ^block_number, ^(block_number + 1), er.block_range),
-          select: er.reward
-        )
-      ) || %Wei{value: Decimal.new(0)}
-
-    has_uncles? = is_list(block.uncles) and not Enum.empty?(block.uncles)
-
-    burned_fees = burned_fees(transactions, base_fee_per_gas)
-    uncle_reward = (has_uncles? && Wei.mult(static_reward, Decimal.from_float(@uncle_reward_coef))) || nil
-
-    %{
-      block_number: block_number,
-      block_hash: block_hash,
-      miner_hash: block.miner_hash,
-      static_reward: static_reward,
-      txn_fees: %Wei{value: txn_fees},
-      burned_fees: burned_fees || %Wei{value: Decimal.new(0)},
-      uncle_reward: uncle_reward || %Wei{value: Decimal.new(0)}
-    }
-  end
-
-  @doc """
   The `t:Explorer.Chain.Wei.t/0` paid to the miners of the `t:Explorer.Chain.Block.t/0`s with `hash`
   `Explorer.Chain.Hash.Full.t/0` by the signers of the transactions in those blocks to cover the gas fee
   (`gas_used * gas_price`).
@@ -973,28 +855,27 @@ defmodule Explorer.Chain do
       {:actual, Decimal.new(4)}
 
   """
-  @spec fee(Transaction.t(), :ether | :gwei | :wei) :: {:maximum, Decimal.t()} | {:actual, Decimal.t()}
-  def fee(%Transaction{gas: gas, gas_price: gas_price, gas_used: nil} = tx, unit) do
-    {:maximum, fee(tx, gas_price, gas, unit)}
+  @spec fee(Transaction.t(), :ether | :gwei | :wei) :: {:maximum, Decimal.t()} | {:actual, Decimal.t() | nil}
+  def fee(%Transaction{gas: _gas, gas_price: nil, gas_used: nil}, _unit), do: {:maximum, nil}
+
+  def fee(%Transaction{gas: gas, gas_price: gas_price, gas_used: nil}, unit) do
+    fee =
+      gas_price
+      |> Wei.to(unit)
+      |> Decimal.mult(gas)
+
+    {:maximum, fee}
   end
 
-  def fee(%Transaction{gas_price: gas_price, gas_used: gas_used} = tx, unit) do
-    {:actual, fee(tx, gas_price, gas_used, unit)}
-  end
+  def fee(%Transaction{gas_price: nil, gas_used: _gas_used}, _unit), do: {:actual, nil}
 
-  defp fee(tx, gas_price, gas, unit) do
-    l1_fee =
-      case Map.get(tx, :l1_fee) do
-        nil -> Wei.from(Decimal.new(0), :wei)
-        value -> value
-      end
+  def fee(%Transaction{gas_price: gas_price, gas_used: gas_used}, unit) do
+    fee =
+      gas_price
+      |> Wei.to(unit)
+      |> Decimal.mult(gas_used)
 
-    gas_price
-    |> Wei.to(unit)
-    |> Decimal.mult(gas)
-    |> Wei.from(unit)
-    |> Wei.sum(l1_fee)
-    |> Wei.to(unit)
+    {:actual, fee}
   end
 
   @doc """
@@ -1299,7 +1180,7 @@ defmodule Explorer.Chain do
       options
       |> Keyword.get(:necessity_by_association, %{})
       |> Map.merge(%{
-        smart_contract_additional_sources: :optional
+        [smart_contract: :smart_contract_additional_sources] => :optional
       })
 
     query =
@@ -1823,196 +1704,6 @@ defmodule Explorer.Chain do
   end
 
   @doc """
-  Lists `t:Explorer.Chain.OptimismTxnBatch.t/0`'s' in descending order based on l2_block_number.
-
-  """
-  @spec list_txn_batches :: [OptimismTxnBatch.t()]
-  def list_txn_batches(options \\ []) do
-    paging_options = Keyword.get(options, :paging_options, @default_paging_options)
-
-    base_query =
-      from(tb in OptimismTxnBatch,
-        order_by: [desc: tb.l2_block_number]
-      )
-
-    base_query
-    |> join_association(:frame_sequence, :required)
-    |> page_txn_batches(paging_options)
-    |> limit(^paging_options.page_size)
-    |> select_repo(options).all()
-  end
-
-  def get_table_rows_total_count(module, options) do
-    table_name = module.__schema__(:source)
-
-    count = CacheHelper.estimated_count_from(table_name, options)
-
-    if is_nil(count) do
-      select_repo(options).aggregate(module, :count, timeout: :infinity)
-    else
-      count
-    end
-  end
-
-  @doc """
-  Lists `t:Explorer.Chain.OptimismOutputRoot.t/0`'s' in descending order based on output root index.
-
-  """
-  @spec list_output_roots :: [OptimismOutputRoot.t()]
-  def list_output_roots(options \\ []) do
-    paging_options = Keyword.get(options, :paging_options, @default_paging_options)
-
-    base_query =
-      from(r in OptimismOutputRoot,
-        order_by: [desc: r.l2_output_index],
-        select: r
-      )
-
-    base_query
-    |> page_output_roots(paging_options)
-    |> limit(^paging_options.page_size)
-    |> select_repo(options).all()
-  end
-
-  @doc """
-  Lists `t:Explorer.Chain.OptimismDeposit.t/0`'s' in descending order based on l1_block_number and l2_transaction_hash.
-
-  """
-  @spec list_optimism_deposits :: [OptimismDeposit.t()]
-  def list_optimism_deposits(options \\ []) do
-    paging_options = Keyword.get(options, :paging_options, @default_paging_options)
-
-    base_query =
-      from(d in OptimismDeposit,
-        order_by: [desc: d.l1_block_number, desc: d.l2_transaction_hash]
-      )
-
-    base_query
-    |> join_association(:l2_transaction, :required)
-    |> page_deposits(paging_options)
-    |> limit(^paging_options.page_size)
-    |> select_repo(options).all()
-  end
-
-  @doc """
-  Lists `t:Explorer.Chain.OptimismWithdrawal.t/0`'s' in descending order based on message nonce.
-
-  """
-  @spec list_optimism_withdrawals :: [OptimismWithdrawal.t()]
-  def list_optimism_withdrawals(options \\ []) do
-    paging_options = Keyword.get(options, :paging_options, @default_paging_options)
-
-    base_query =
-      from(w in OptimismWithdrawal,
-        order_by: [desc: w.msg_nonce],
-        left_join: l2_tx in Transaction,
-        on: w.l2_transaction_hash == l2_tx.hash,
-        left_join: l2_block in Block,
-        on: w.l2_block_number == l2_block.number,
-        left_join: we in OptimismWithdrawalEvent,
-        on: we.withdrawal_hash == w.hash and we.l1_event_type == :WithdrawalFinalized,
-        select: %{
-          msg_nonce: w.msg_nonce,
-          hash: w.hash,
-          l2_block_number: w.l2_block_number,
-          l2_timestamp: l2_block.timestamp,
-          l2_transaction_hash: w.l2_transaction_hash,
-          l1_transaction_hash: we.l1_transaction_hash,
-          from: l2_tx.from_address_hash
-        }
-      )
-
-    base_query
-    |> page_optimism_withdrawals(paging_options)
-    |> limit(^paging_options.page_size)
-    |> select_repo(options).all()
-  end
-
-  @doc """
-    Gets withdrawal statuses for Optimism Withdrawal transaction.
-    For each withdrawal associated with this transaction,
-    returns the status and the corresponding L1 transaction hash if the status is `Relayed`.
-  """
-  @spec optimism_withdrawal_transaction_statuses(Hash.t()) :: [{non_neg_integer(), String.t(), Hash.t() | nil}]
-  def optimism_withdrawal_transaction_statuses(l2_transaction_hash) do
-    query =
-      from(w in OptimismWithdrawal,
-        where: w.l2_transaction_hash == ^l2_transaction_hash,
-        left_join: l2_block in Block,
-        on: w.l2_block_number == l2_block.number and l2_block.consensus == true,
-        left_join: we in OptimismWithdrawalEvent,
-        on: we.withdrawal_hash == w.hash and we.l1_event_type == :WithdrawalFinalized,
-        select: %{
-          hash: w.hash,
-          l2_timestamp: l2_block.timestamp,
-          l1_transaction_hash: we.l1_transaction_hash,
-          msg_nonce: w.msg_nonce
-        }
-      )
-
-    query
-    |> Repo.replica().all()
-    |> Enum.map(fn w ->
-      msg_nonce =
-        Bitwise.band(
-          Decimal.to_integer(w.msg_nonce),
-          0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-        )
-
-      {status, _} = optimism_withdrawal_status(w)
-      {msg_nonce, status, w.l1_transaction_hash}
-    end)
-  end
-
-  @doc """
-    Gets Optimism Withdrawal status and remaining time to unlock (when the status is `In challenge period`).
-  """
-  @spec optimism_withdrawal_status(map()) :: {String.t(), DateTime.t() | nil}
-  def optimism_withdrawal_status(w) when is_nil(w.l1_transaction_hash) do
-    l1_timestamp =
-      Repo.replica().one(
-        from(
-          we in OptimismWithdrawalEvent,
-          select: we.l1_timestamp,
-          where: we.withdrawal_hash == ^w.hash and we.l1_event_type == :WithdrawalProven
-        )
-      )
-
-    if is_nil(l1_timestamp) do
-      last_root_timestamp =
-        Repo.replica().one(
-          from(root in OptimismOutputRoot,
-            select: root.l1_timestamp,
-            order_by: [desc: root.l2_output_index],
-            limit: 1
-          )
-        ) || 0
-
-      if w.l2_timestamp > last_root_timestamp do
-        {"Waiting for state root", nil}
-      else
-        {"Ready to prove", nil}
-      end
-    else
-      challenge_period =
-        case OptimismFinalizationPeriod.get_period() do
-          nil -> 604_800
-          period -> period
-        end
-
-      if DateTime.compare(l1_timestamp, DateTime.add(DateTime.utc_now(), -challenge_period, :second)) == :lt do
-        {"Ready for relay", nil}
-      else
-        {"In challenge period", DateTime.add(l1_timestamp, challenge_period, :second)}
-      end
-    end
-  end
-
-  def optimism_withdrawal_status(_w) do
-    {"Relayed", nil}
-  end
-
-  @doc """
   Calls `reducer` on a stream of `t:Explorer.Chain.Block.t/0` without `t:Explorer.Chain.Block.Reward.t/0`.
   """
   def stream_blocks_without_rewards(initial, reducer, limited? \\ false) when is_function(reducer, 2) do
@@ -2429,6 +2120,16 @@ defmodule Explorer.Chain do
       _ ->
         block_status(nil)
     end
+  end
+
+  @spec increment_last_fetched_counter(binary(), non_neg_integer()) :: {non_neg_integer(), nil}
+  def increment_last_fetched_counter(type, value) do
+    query =
+      from(counter in LastFetchedCounter,
+        where: counter.counter_type == ^type
+      )
+
+    Repo.update_all(query, [inc: [value: value]], timeout: :infinity)
   end
 
   @spec upsert_last_fetched_counter(map()) :: {:ok, LastFetchedCounter.t()} | {:error, Ecto.Changeset.t()}
@@ -3570,33 +3271,6 @@ defmodule Explorer.Chain do
     end)
   end
 
-  defp page_deposits(query, %PagingOptions{key: nil}), do: query
-
-  defp page_deposits(query, %PagingOptions{key: {block_number, l2_tx_hash}}) do
-    from(d in query,
-      where: d.l1_block_number < ^block_number,
-      or_where: d.l1_block_number == ^block_number and d.l2_transaction_hash < ^l2_tx_hash
-    )
-  end
-
-  defp page_txn_batches(query, %PagingOptions{key: nil}), do: query
-
-  defp page_txn_batches(query, %PagingOptions{key: {block_number}}) do
-    from(tb in query, where: tb.l2_block_number < ^block_number)
-  end
-
-  defp page_output_roots(query, %PagingOptions{key: nil}), do: query
-
-  defp page_output_roots(query, %PagingOptions{key: {index}}) do
-    from(r in query, where: r.l2_output_index < ^index)
-  end
-
-  defp page_optimism_withdrawals(query, %PagingOptions{key: nil}), do: query
-
-  defp page_optimism_withdrawals(query, %PagingOptions{key: {nonce}}) do
-    from(w in query, where: w.msg_nonce < ^nonce)
-  end
-
   defp page_blocks(query, %PagingOptions{key: nil}), do: query
 
   defp page_blocks(query, %PagingOptions{key: {block_number}}) do
@@ -3766,7 +3440,7 @@ defmodule Explorer.Chain do
   end
 
   @doc """
-  The current total number of coins minted minus verifiably burned coins.
+  The current total number of coins minted minus verifiably burnt coins.
   """
   @spec total_supply :: non_neg_integer() | nil
   def total_supply do
@@ -3811,56 +3485,6 @@ defmodule Explorer.Chain do
     query
     |> add_fetcher_limit(limited?)
     |> Repo.stream_reduce(initial, reducer)
-  end
-
-  @doc """
-    Finds all token instances (pairs of contract_address_hash and token_id) which was met in token transfers but has no corresponding entry in token_instances table
-  """
-  @spec stream_not_inserted_token_instances(
-          initial :: accumulator,
-          reducer :: (entry :: map(), accumulator -> accumulator)
-        ) :: {:ok, accumulator}
-        when accumulator: term()
-  def stream_not_inserted_token_instances(initial, reducer) when is_function(reducer, 2) do
-    nft_tokens =
-      from(
-        token in Token,
-        where: token.type == ^"ERC-721" or token.type == ^"ERC-1155",
-        select: token.contract_address_hash
-      )
-
-    token_ids_query =
-      from(
-        token_transfer in TokenTransfer,
-        select: %{
-          token_contract_address_hash: token_transfer.token_contract_address_hash,
-          token_id: fragment("unnest(?)", token_transfer.token_ids)
-        }
-      )
-
-    query =
-      from(
-        transfer in subquery(token_ids_query),
-        inner_join: token in subquery(nft_tokens),
-        on: token.contract_address_hash == transfer.token_contract_address_hash,
-        left_join: instance in Instance,
-        on:
-          transfer.token_contract_address_hash == instance.token_contract_address_hash and
-            transfer.token_id == instance.token_id,
-        where: is_nil(instance.token_id),
-        select: %{
-          contract_address_hash: transfer.token_contract_address_hash,
-          token_id: transfer.token_id
-        }
-      )
-
-    distinct_query =
-      from(
-        q in subquery(query),
-        distinct: [q.contract_address_hash, q.token_id]
-      )
-
-    Repo.stream_reduce(distinct_query, initial, reducer)
   end
 
   @doc """
@@ -3954,12 +3578,9 @@ defmodule Explorer.Chain do
       `:required`, and the `t:Token.t/0` has no associated record for that association,
       then the `t:Token.t/0` will not be included in the list.
   """
-  @spec token_from_address_hash(Hash.Address.t(), [necessity_by_association_option | api?]) ::
+  @spec token_from_address_hash(Hash.Address.t() | String.t(), [necessity_by_association_option | api?]) ::
           {:ok, Token.t()} | {:error, :not_found}
-  def token_from_address_hash(
-        %Hash{byte_count: unquote(Hash.Address.byte_count())} = hash,
-        options \\ []
-      ) do
+  def token_from_address_hash(hash, options \\ []) do
     necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
 
     query =
@@ -4507,6 +4128,10 @@ defmodule Explorer.Chain do
     |> Enum.map(&put_owner_to_token_instance(&1, token, options))
   end
 
+  @doc """
+    Put owner address to unique token instance. If not unique, return original instance.
+  """
+  @spec put_owner_to_token_instance(Instance.t(), Token.t(), [api?]) :: Instance.t()
   def put_owner_to_token_instance(token_instance, token, options \\ [])
 
   def put_owner_to_token_instance(%Instance{is_unique: nil} = token_instance, token, options) do
@@ -4706,70 +4331,16 @@ defmodule Explorer.Chain do
     Repo.one(query)
   end
 
-  @spec is_erc_20_token?(Token.t()) :: bool
-  def is_erc_20_token?(token) do
-    is_erc_20_token_type?(token.type)
+  @spec erc_20_token?(Token.t()) :: bool
+  def erc_20_token?(token) do
+    erc_20_token_type?(token.type)
   end
 
-  defp is_erc_20_token_type?(type) do
+  defp erc_20_token_type?(type) do
     case type do
       "ERC-20" -> true
       _ -> false
     end
-  end
-
-  @doc """
-  Checks if an `t:Explorer.Chain.Address.t/0` with the given `hash` exists.
-
-  Returns `:ok` if found
-
-      iex> {:ok, %Explorer.Chain.Address{hash: hash}} = Explorer.Chain.create_address(
-      ...>   %{hash: "0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed"}
-      ...> )
-      iex> Explorer.Chain.check_address_exists(hash)
-      :ok
-
-  Returns `:not_found` if not found
-
-      iex> {:ok, hash} = Explorer.Chain.string_to_address_hash("0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed")
-      iex> Explorer.Chain.check_address_exists(hash)
-      :not_found
-
-  """
-  @spec check_address_exists(Hash.Address.t()) :: :ok | :not_found
-  def check_address_exists(address_hash) do
-    address_hash
-    |> address_exists?()
-    |> boolean_to_check_result()
-  end
-
-  @doc """
-  Checks if an `t:Explorer.Chain.Address.t/0` with the given `hash` exists.
-
-  Returns `true` if found
-
-      iex> {:ok, %Explorer.Chain.Address{hash: hash}} = Explorer.Chain.create_address(
-      ...>   %{hash: "0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed"}
-      ...> )
-      iex> Explorer.Chain.address_exists?(hash)
-      true
-
-  Returns `false` if not found
-
-      iex> {:ok, hash} = Explorer.Chain.string_to_address_hash("0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed")
-      iex> Explorer.Chain.address_exists?(hash)
-      false
-
-  """
-  @spec address_exists?(Hash.Address.t()) :: boolean()
-  def address_exists?(address_hash) do
-    query =
-      from(
-        address in Address,
-        where: address.hash == ^address_hash
-      )
-
-    Repo.exists?(query)
   end
 
   @doc """
@@ -5217,9 +4788,9 @@ defmodule Explorer.Chain do
     |> Repo.one()
   end
 
-  def is_address_hash_is_smart_contract?(nil), do: false
+  def address_hash_is_smart_contract?(nil), do: false
 
-  def is_address_hash_is_smart_contract?(address_hash) do
+  def address_hash_is_smart_contract?(address_hash) do
     with %Address{contract_code: bytecode} <- Repo.get_by(Address, hash: address_hash),
          false <- is_nil(bytecode) do
       true
