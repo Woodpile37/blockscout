@@ -492,6 +492,10 @@ config :explorer, Explorer.Chain.BridgedToken,
   amb_bridge_mediators: System.get_env("BRIDGED_TOKENS_AMB_BRIDGE_MEDIATORS"),
   foreign_json_rpc: System.get_env("BRIDGED_TOKENS_FOREIGN_JSON_RPC", "")
 
+config :explorer, Explorer.Migrator.TransactionsDenormalization,
+  batch_size: ConfigHelper.parse_integer_env_var("DENORMALIZATION_MIGRATION_BATCH_SIZE", 500),
+  concurrency: ConfigHelper.parse_integer_env_var("DENORMALIZATION_MIGRATION_CONCURRENCY", 10)
+
 ###############
 ### Indexer ###
 ###############

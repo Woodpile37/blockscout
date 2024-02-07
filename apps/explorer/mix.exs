@@ -11,7 +11,7 @@ defmodule Explorer.Mixfile do
       deps_path: "../../deps",
       description: "Read-access to indexed block chain data.",
       dialyzer: [
-        plt_add_deps: :app_tree,
+        plt_add_deps: :transitive,
         plt_add_apps: ~w(ex_unit mix)a,
         ignore_warnings: "../../.dialyzer-ignore"
       ],
@@ -24,7 +24,7 @@ defmodule Explorer.Mixfile do
         dialyzer: :test
       ],
       start_permanent: Mix.env() == :prod,
-      version: "6.1.0",
+      version: "6.0.0",
       xref: [exclude: [BlockScoutWeb.WebRouter.Helpers]]
     ]
   end

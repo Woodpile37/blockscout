@@ -11,7 +11,7 @@ defmodule BlockScoutWeb.Mixfile do
       deps_path: "../../deps",
       description: "Web interface for BlockScout.",
       dialyzer: [
-        plt_add_deps: :app_tree,
+        plt_add_deps: :transitive,
         ignore_warnings: "../../.dialyzer-ignore"
       ],
       elixir: "~> 1.13",
@@ -23,7 +23,7 @@ defmodule BlockScoutWeb.Mixfile do
         dialyzer: :test
       ],
       start_permanent: Mix.env() == :prod,
-      version: "6.1.0",
+      version: "6.0.0",
       xref: [exclude: [Explorer.Chain.Zkevm.Reader]]
     ]
   end
@@ -96,7 +96,7 @@ defmodule BlockScoutWeb.Mixfile do
       {:math, "~> 0.7.0"},
       {:mock, "~> 0.3.0", only: [:test], runtime: false},
       {:number, "~> 1.0.1"},
-      {:phoenix, "== 1.7.11"},
+      {:phoenix, "== 1.5.14"},
       {:phoenix_ecto, "~> 4.1"},
       {:phoenix_html, "== 3.0.4"},
       {:phoenix_live_reload, "~> 1.2", only: [:dev]},
